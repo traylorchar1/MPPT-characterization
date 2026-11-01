@@ -1,0 +1,25 @@
+syntax = "proto2";
+
+import "state.proto";
+
+message LogMessage {
+  optional StateMessage state = 1;
+  optional double batt_i = 2;
+  optional double batt_v = 3;
+  optional double batt_p = 4;
+  optional double eff = 5;
+  repeated TrackerFloatChannel chan = 6;
+  optional double time = 7;
+}
+
+message TrackerFloatChannel {
+  optional double i = 1;
+  optional double v = 2;
+  optional double p = 3;
+  optional double freq = 4;
+}
+
+
+message StateLog {
+  repeated LogMessage state_data = 1;
+}

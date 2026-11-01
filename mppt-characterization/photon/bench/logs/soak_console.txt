@@ -1,0 +1,47 @@
+soak 24.0 V / 8.00 A for 30 min, log logs/soak_20261007_233119.csv
+  1 min: XPF  23.90 V 6.914 A (max 8.390)  165.4 W =  86.1% | temp  27.7 C (max  28.8) | Vout  117.1 V | control ['TRACKING'] | faults none
+  2 min: XPF  23.73 V 7.594 A (max 8.378)  180.1 W =  93.8% | temp  29.2 C (max  29.6) | Vout  117.5 V | control ['TRACKING'] | faults none
+  3 min: XPF  23.69 V 7.489 A (max 8.345)  177.3 W =  92.3% | temp  29.9 C (max  30.2) | Vout  117.5 V | control ['TRACKING'] | faults none
+  4 min: XPF  23.71 V 7.567 A (max 8.386)  179.3 W =  93.4% | temp  30.5 C (max  30.8) | Vout  117.6 V | control ['TRACKING'] | faults none
+  5 min: XPF  23.72 V 7.415 A (max 8.395)  175.7 W =  91.5% | temp  30.9 C (max  31.1) | Vout  117.6 V | control ['TRACKING'] | faults none
+  6 min: XPF  23.73 V 7.555 A (max 8.330)  179.2 W =  93.3% | temp  31.4 C (max  31.7) | Vout  117.6 V | control ['TRACKING'] | faults none
+  7 min: XPF  23.88 V 7.415 A (max 8.219)  177.0 W =  92.2% | temp  31.8 C (max  32.0) | Vout  117.6 V | control ['TRACKING'] | faults none
+  8 min: XPF  23.91 V 7.596 A (max 8.400)  181.6 W =  94.6% | temp  32.3 C (max  32.5) | Vout  117.7 V | control ['TRACKING'] | faults none
+  9 min: XPF  23.81 V 7.468 A (max 8.369)  177.8 W =  92.6% | temp  32.7 C (max  32.8) | Vout  117.6 V | control ['TRACKING'] | faults none
+ 10 min: XPF  23.63 V 7.588 A (max 8.226)  179.2 W =  93.3% | temp  33.0 C (max  33.2) | Vout  117.6 V | control ['TRACKING'] | faults none
+ 11 min: XPF  23.69 V 7.430 A (max 8.370)  175.8 W =  91.6% | temp  33.4 C (max  33.5) | Vout  117.6 V | control ['TRACKING'] | faults none
+ 12 min: XPF  23.75 V 7.607 A (max 8.348)  180.6 W =  94.1% | temp  33.8 C (max  34.0) | Vout  117.6 V | control ['TRACKING'] | faults none
+ 13 min: XPF  23.86 V 7.433 A (max 8.376)  177.3 W =  92.3% | temp  34.1 C (max  34.2) | Vout  117.6 V | control ['TRACKING'] | faults none
+ 14 min: XPF  23.76 V 7.591 A (max 8.298)  180.3 W =  93.9% | temp  34.5 C (max  34.7) | Vout  117.6 V | control ['TRACKING'] | faults none
+ 15 min: XPF  23.80 V 7.377 A (max 8.293)  175.5 W =  91.4% | temp  34.7 C (max  34.9) | Vout  117.6 V | control ['TRACKING'] | faults none
+ 16 min: XPF  23.91 V 7.604 A (max 8.293)  181.8 W =  94.7% | temp  35.0 C (max  35.2) | Vout  117.7 V | control ['TRACKING'] | faults none
+ 17 min: XPF  23.13 V 7.448 A (max 8.251)  171.9 W =  89.5% | temp  35.3 C (max  35.4) | Vout  117.6 V | control ['TRACKING'] | faults none
+ 18 min: XPF  23.68 V 7.638 A (max 8.413)  180.8 W =  94.2% | temp  35.6 C (max  35.8) | Vout  117.7 V | control ['TRACKING'] | faults none
+ 19 min: XPF  23.82 V 7.464 A (max 8.366)  177.7 W =  92.6% | temp  35.8 C (max  36.0) | Vout  117.7 V | control ['TRACKING'] | faults none
+ 20 min: XPF  23.83 V 7.508 A (max 8.379)  178.8 W =  93.1% | temp  36.0 C (max  36.2) | Vout  117.7 V | control ['TRACKING'] | faults none
+ 21 min: XPF  23.94 V 7.584 A (max 8.379)  181.6 W =  94.6% | temp  36.3 C (max  36.4) | Vout  117.7 V | control ['TRACKING'] | faults none
+ 22 min: XPF  23.81 V 7.429 A (max 8.401)  176.8 W =  92.1% | temp  36.6 C (max  36.7) | Vout  117.7 V | control ['TRACKING'] | faults none
+ 23 min: XPF  23.80 V 7.603 A (max 8.233)  180.9 W =  94.2% | temp  36.8 C (max  37.0) | Vout  117.6 V | control ['TRACKING'] | faults none
+ 24 min: XPF  23.70 V 7.481 A (max 8.223)  177.2 W =  92.3% | temp  37.0 C (max  37.2) | Vout  117.6 V | control ['TRACKING'] | faults none
+complete | CH2 off | log logs/soak_20261007_233119.csv
+Traceback (most recent call last):
+  File "/Users/akhilmarri/photon_bench/soak.py", line 114, in <module>
+    main()
+    ~~~~^^
+  File "/Users/akhilmarri/photon_bench/soak.py", line 66, in main
+    mv, mi = x.meas(2)
+             ~~~~~~^^^
+  File "/Users/akhilmarri/xpf.py", line 38, in meas
+    return self.num(f"V{ch}O?"), self.num(f"I{ch}O?")
+           ~~~~~~~~^^^^^^^^^^^^
+  File "/Users/akhilmarri/xpf.py", line 35, in num
+    return float(self.query(cmd).split()[-1].rstrip("VA"))
+                 ~~~~~~~~~~^^^^^
+  File "/Users/akhilmarri/xpf.py", line 31, in query
+    return self.s.readline().decode(errors="replace").strip()
+           ~~~~~~~~~~~~~~~^^
+  File "/Users/akhilmarri/.rigol-venv/lib/python3.14/site-packages/serial/serialposix.py", line 595, in read
+    raise SerialException(
+        'device reports readiness to read but returned no data '
+        '(device disconnected or multiple access on port?)')
+serial.serialutil.SerialException: device reports readiness to read but returned no data (device disconnected or multiple access on port?)

@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SEC-B175-7A efficiency sweep</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+.viz-root {
+  color-scheme: light;
+  --surface-0: #f5f5f3;
+  --surface-1: #fcfcfb;
+  --surface-2: #f0efec;
+  --border: #e4e3df;
+  --grid: #ecebe7;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #7c7b76;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19; --surface-2: #383835;
+    --border: #2e2e2c; --grid: #262624;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --series-1: #3987e5; --series-2: #d95926;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface-0: #121211; --surface-1: #1a1a19; --surface-2: #383835;
+  --border: #2e2e2c; --grid: #262624;
+  --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+  --series-1: #3987e5; --series-2: #d95926;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.viz-root {
+  min-height: 100vh; background: var(--surface-0); color: var(--text-primary);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 16px 20px 32px;
+}
+header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+h1 { font-size: 18px; font-weight: 600; margin: 0; }
+h2 { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+.sub { color: var(--text-secondary); font-size: 12px; }
+.muted { color: var(--text-muted); }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  font-weight: 600; font-size: 12px; border: 1px solid var(--border); background: var(--surface-1); }
+.pill .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-grid; place-items: center;
+  font-size: 9px; color: #fff; line-height: 1; }
+.progress { flex: 1; min-width: 220px; }
+.bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 4px; }
+.bar > div { height: 100%; background: var(--series-1); border-radius: 3px; transition: width .3s; }
+.message { margin: -4px 0 12px; font-size: 12px; color: var(--text-secondary); min-height: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.tile .label { font-size: 11px; color: var(--text-secondary); }
+.tile .value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile .detail { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 12px; margin-bottom: 12px; }
+.grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+@media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } .grid4 { grid-template-columns: repeat(2, 1fr); } }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { fill: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.axis line, .axis path { stroke: var(--border); }
+.gridline { stroke: var(--grid); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface-1); color: var(--text-secondary); padding: 4px 10px;
+  font: inherit; font-size: 12px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--text-primary); font-weight: 600; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--text-secondary); margin-top: 6px; align-items: center; }
+.legend .sw { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.ramp { width: 160px; height: 8px; border-radius: 4px; }
+#tip { position: fixed; pointer-events: none; z-index: 10; background: var(--surface-1); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(0,0,0,.15); display: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#tip .k { color: var(--text-secondary); }
+.cam { width: 100%; border-radius: 6px; background: var(--surface-2); aspect-ratio: 16/9; object-fit: contain; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 6px; text-align: right; border-bottom: 1px solid var(--border); }
+th { color: var(--text-secondary); font-weight: 600; position: sticky; top: 0; background: var(--surface-1); }
+.tablewrap { max-height: 320px; overflow: auto; }
+.themebtn { margin-left: auto; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <header>
+    <h1>SEC-B175-7A efficiency sweep</h1>
+    <span class="pill" id="status"><span class="dot"></span><span>connecting</span></span>
+    <div class="progress">
+      <div class="sub" id="progress-text">no run yet</div>
+      <div class="bar"><div id="progress-bar" style="width:0%"></div></div>
+    </div>
+    <div class="seg themebtn" role="group" aria-label="Theme">
+      <button data-theme-set="light">Light</button><button data-theme-set="dark">Dark</button><button data-theme-set="">Auto</button>
+    </div>
+  </header>
+  <div class="message" id="message"></div>
+
+  <div class="tiles">
+    <div class="tile"><div class="label">Set point</div><div class="value" id="t-set">-</div><div class="detail" id="t-set-d">&nbsp;</div></div>
+    <div class="tile"><div class="label">XPF input (bench)</div><div class="value" id="t-psu">-</div><div class="detail" id="t-psu-d">&nbsp;</div></div>
+    <div class="tile"><div class="label">MPPT input (telemetry)</div><div class="value" id="t-min">-</div><div class="detail" id="t-min-d">&nbsp;</div></div>
+    <div class="tile"><div class="label">MPPT output (telemetry)</div><div class="value" id="t-mout">-</div><div class="detail" id="t-mout-d">&nbsp;</div></div>
+    <div class="tile"><div class="label">Load (camera)</div><div class="value" id="t-load">-</div><div class="detail" id="t-load-d">&nbsp;</div></div>
+    <div class="tile"><div class="label">Efficiency, last point</div><div class="value" id="t-eff">-</div><div class="detail" id="t-eff-d">&nbsp;</div></div>
+    <div class="tile"><div class="label">MPPT state</div><div class="value" id="t-mode">-</div><div class="detail" id="t-mode-d">&nbsp;</div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="card-head">
+        <div><h2 id="hm-title">Efficiency map</h2><div class="sub">Input voltage vs input current. Outlined cell = current set point.</div></div>
+        <div class="seg" role="group" aria-label="Heatmap metric" id="hm-metric">
+          <button data-m="eff_bench" aria-pressed="true">Bench eff.</button>
+          <button data-m="eff_psu_mppt">XPF in / MPPT out</button>
+          <button data-m="eff_mppt_telemetry">MPPT telemetry eff.</button>
+          <button data-m="settle_s">Settle time</button>
+        </div>
+      </div>
+      <svg id="heatmap"></svg>
+      <div class="legend"><span id="hm-lo">-</span><canvas class="ramp" id="hm-ramp" width="160" height="8"></canvas><span id="hm-hi">-</span><span class="muted" id="hm-note"></span></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h2>Bench camera</h2><div class="sub" id="cam-sub">latest frame</div></div></div>
+      <img class="cam" id="cam" alt="Latest phone-camera frame of the bench">
+      <div style="margin-top:12px">
+        <h2>Power, last 60 s</h2>
+        <svg id="trace"></svg>
+        <div class="legend"><span><span class="sw" style="background:var(--series-1)"></span>Input (XPF)</span><span><span class="sw" style="background:var(--series-2)"></span>Output (MPPT telemetry)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-head">
+      <div><h2>Efficiency vs actual input current</h2><div class="sub" id="lines-sub">One line per input voltage. Bench efficiency (load / XPF).</div></div>
+    </div>
+    <svg id="lines"></svg>
+    <div class="legend" id="lines-legend"></div>
+  </div>
+
+  <div class="grid4">
+    <div class="card"><h2>Input voltage: MPPT - XPF</h2><div class="sub">volts</div><svg id="x-dVin"></svg></div>
+    <div class="card"><h2>Input current: MPPT - XPF</h2><div class="sub">amps</div><svg id="x-dIin"></svg></div>
+    <div class="card"><h2>Output voltage: MPPT - load</h2><div class="sub">volts</div><svg id="x-dVout"></svg></div>
+    <div class="card"><h2>Output current: MPPT - load</h2><div class="sub">amps</div><svg id="x-dIout"></svg></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div><h2>Recorded points</h2><div class="sub" id="table-sub">newest first</div></div></div>
+    <div class="tablewrap"><table id="table"></table></div>
+  </div>
+</div>
+<div id="tip"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const NS = "http://www.w3.org/2000/svg";
+const RAMP = ["#cde2fb","#b7d3f6","#9ec5f4","#86b6ef","#6da7ec","#5598e7","#3987e5","#2a78d6","#256abf","#1c5cab","#184f95","#104281","#0d366b"];
+const STATUS = {
+  RUNNING:   {c: "--good", i: "▶", t: "Running"},
+  STARTING:  {c: "--warning", i: "…", t: "Starting"},
+  FINISHING: {c: "--good", i: "…", t: "Finishing reads"},
+  DONE:      {c: "--good", i: "✓", t: "Done"},
+  MONITOR:   {c: "--series-1", i: "●", t: "Monitoring (read-only)"},
+  ABORTED:   {c: "--critical", i: "✕", t: "Aborted"},
+  STOPPED:   {c: "--warning", i: "■", t: "Stopped"},
+  IDLE:      {c: "--text-muted", i: "○", t: "Idle"},
+  STALE:     {c: "--serious", i: "!", t: "No updates"},
+};
+let live = {}, rows = [], metric = "eff_bench", trace = [];
+
+const css = v => getComputedStyle($(".viz-root")).getPropertyValue(v).trim();
+const dark = () => css("color-scheme") === "dark";
+const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? "-" : Number(v).toFixed(d);
+const pct = v => (v === null || v === undefined) ? "-" : (v * 100).toFixed(2) + "%";
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function hexLerp(a, b, t) {
+  const pa = [1,3,5].map(i => parseInt(a.slice(i, i+2), 16)), pb = [1,3,5].map(i => parseInt(b.slice(i, i+2), 16));
+  return "#" + pa.map((x, i) => Math.round(x + (pb[i] - x) * t).toString(16).padStart(2, "0")).join("");
+}
+function rampAt(t, lo = 0, hi = RAMP.length - 1) {  // t in 0..1, low = recedes toward the surface
+  t = Math.max(0, Math.min(1, t));
+  const steps = RAMP.slice(lo, hi + 1);
+  const seq = dark() ? [...steps].reverse() : steps;
+  const x = t * (seq.length - 1), i = Math.min(seq.length - 2, Math.floor(x));
+  return hexLerp(seq[i], seq[i + 1], x - i);
+}
+
+// ---------- tooltip ----------
+const tip = $("#tip");
+function showTip(ev, html) {
+  tip.innerHTML = html; tip.style.display = "block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + w > innerWidth - 8) x = ev.clientX - w - 14;
+  if (y + h > innerHeight - 8) y = ev.clientY - h - 14;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+const hideTip = () => tip.style.display = "none";
+
+// ---------- scales / axes ----------
+function linear(d0, d1, r0, r1) { const f = v => r0 + (v - d0) / (d1 - d0 || 1) * (r1 - r0); f.inv = p => d0 + (p - r0) / (r1 - r0) * (d1 - d0); return f; }
+function niceTicks(lo, hi, n = 5) {
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const span = hi - lo, step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= n) || mag * 10;
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+
+// ---------- heatmap ----------
+function planned() {
+  const g = live.grid; if (!g) return null;
+  const vs = []; for (let v = g.vmax; v >= g.vmin - 1e-9; v -= g.vstep) vs.push(+v.toFixed(3));
+  const env = vc => vc <= 16 ? 10 : vc <= 35 ? 10 - (vc - 16) * 5 / 19 : vc <= 60 ? 5 - (vc - 35) * 2 / 25 : 3;
+  const cap = v => Math.min(g.imax, env(v / (g.nch || 2)), g.pmax / v);
+  const ncols = Math.round(g.imax / g.istep);
+  return {vs, cap, ncols, istep: g.istep};
+}
+function drawHeatmap() {
+  const svg = $("#heatmap"); svg.innerHTML = "";
+  let P = planned();
+  if (!P) {  // no grid info: derive from recorded rows
+    const vs = [...new Set(rows.map(r => r.set_V))].sort((a, b) => b - a);
+    if (!vs.length) { el("text", {x: 10, y: 20}, svg).textContent = "Waiting for a sweep to start."; svg.setAttribute("viewBox", "0 0 600 40"); return; }
+    const imax = Math.max(...rows.map(r => r.set_I)); P = {vs, cap: () => imax, ncols: Math.round(imax / 0.1), istep: 0.1};
+  }
+  const W = 760, m = {l: 44, r: 8, t: 6, b: 30}, cw = (W - m.l - m.r) / P.ncols, ch = Math.max(14, Math.min(26, 360 / P.vs.length));
+  const H = m.t + ch * P.vs.length + m.b;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const byKey = new Map(rows.map(r => [`${r.set_V}|${r.set_I}`, r]));
+  const vals = rows.map(r => r[metric]).filter(v => typeof v === "number" && isFinite(v) && (metric === "settle_s" || (v > 0.5 && v < 1.05)));
+  let lo = 0, hi = 1;
+  if (vals.length) {
+    const s = [...vals].sort((a, b) => a - b);
+    lo = s[Math.floor(s.length * 0.05)]; hi = s[s.length - 1];
+    if (hi - lo < 1e-6) { lo -= 0.005; hi += 0.005; }
+  }
+  const isEff = metric !== "settle_s";
+  $("#hm-lo").textContent = isEff ? pct(lo) : fmt(lo) + " s";
+  $("#hm-hi").textContent = isEff ? pct(hi) : fmt(hi) + " s";
+  $("#hm-note").textContent = isEff ? "(lowest 5% clipped to the light end)" : "";
+  const ctx = $("#hm-ramp").getContext("2d");
+  for (let x = 0; x < 160; x++) { ctx.fillStyle = rampAt(x / 159); ctx.fillRect(x, 0, 1, 8); }
+  const sp = live.set || {}, isLive = ["RUNNING", "STARTING"].includes(live.status);
+  P.vs.forEach((v, yi) => {
+    const y = m.t + yi * ch;
+    el("text", {x: m.l - 6, y: y + ch / 2 + 4, "text-anchor": "end"}, svg).textContent = v + " V";
+    const n = Math.floor(P.cap(v) / P.istep + 1e-6);
+    for (let k = 1; k <= n; k++) {
+      const i = +(k * P.istep).toFixed(3), x = m.l + (k - 1) * cw;
+      const r = byKey.get(`${v}|${i}`), val = r ? r[metric] : null;
+      const fill = (typeof val === "number") ? rampAt((val - lo) / (hi - lo)) : css("--surface-2");
+      const rect = el("rect", {x: x + 1, y: y + 1, width: Math.max(1, cw - 2), height: ch - 2, rx: 2, fill}, svg);
+      if (r && typeof val !== "number") rect.setAttribute("opacity", "0.5");
+      rect.addEventListener("mousemove", ev => showTip(ev, r
+        ? `<b>${v} V, ${i} A set</b><br><span class="k">Actual in</span> ${fmt(r.in_V_actual, 2)} V ${fmt(r.in_I_actual, 3)} A<br><span class="k">Bench eff.</span> ${pct(r.eff_bench)}<br><span class="k">Telemetry eff.</span> ${pct(r.eff_mppt_telemetry)}<br><span class="k">P in / out</span> ${fmt(r.P_in_psu, 1)} / ${fmt(r.P_out_load, 1)} W<br><span class="k">Settle</span> ${fmt(r.settle_s)} s &middot; ${r.mppt_mode || ""}`
+        : `<b>${v} V, ${i} A</b><br><span class="k">not measured yet</span>`));
+      rect.addEventListener("mouseleave", hideTip);
+      if (isLive && Math.abs(sp.V - v) < 1e-6 && Math.abs(sp.I - i) < 1e-6)
+        el("rect", {x: x, y: y, width: cw, height: ch, rx: 3, fill: "none", stroke: css("--text-primary"), "stroke-width": 2}, svg);
+    }
+  });
+  const yb = m.t + ch * P.vs.length;
+  for (let a = 1; a <= P.ncols * P.istep + 1e-9; a += 1) {
+    const x = m.l + (a / P.istep - 0.5) * cw;
+    el("text", {x, y: yb + 14, "text-anchor": "middle"}, svg).textContent = a;
+  }
+  el("text", {x: m.l + (W - m.l - m.r) / 2, y: yb + 28, "text-anchor": "middle"}, svg).textContent = "Input current (A)";
+  $("#hm-title").textContent = {eff_bench: "Efficiency map (bench)", eff_psu_mppt: "Efficiency map (XPF in / MPPT out)", eff_mppt_telemetry: "Efficiency map (MPPT telemetry)", settle_s: "Settle time map"}[metric];
+}
+
+// ---------- efficiency vs current ----------
+function drawLines() {
+  const svg = $("#lines"); svg.innerHTML = "";
+  const W = 1100, H = 300, m = {l: 52, r: 16, t: 10, b: 32};
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const pts = rows.filter(r => typeof r.eff_bench === "number" && r.eff_bench > 0.5 && r.eff_bench < 1.05);
+  const vs = [...new Set(rows.map(r => r.set_V))].sort((a, b) => a - b);
+  if (!pts.length) { el("text", {x: m.l, y: 30}, svg).textContent = "No efficiency points yet."; $("#lines-legend").innerHTML = ""; return; }
+  const ys = pts.map(r => r.eff_bench * 100).sort((a, b) => a - b);
+  const ylo = Math.floor(ys[Math.floor(ys.length * 0.02)]), yhi = Math.min(100, Math.ceil(ys[ys.length - 1] + 0.2));
+  const imax = live.grid ? live.grid.imax : Math.max(...pts.map(r => r.set_I));
+  const x = linear(0, imax, m.l, W - m.r), y = linear(ylo, yhi, H - m.b, m.t);
+  niceTicks(ylo, yhi, 6).forEach(t => {
+    el("line", {x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), class: "gridline"}, svg);
+    el("text", {x: m.l - 6, y: y(t) + 4, "text-anchor": "end"}, svg).textContent = t + "%";
+  });
+  for (let a = 0; a <= imax; a++) el("text", {x: x(a), y: H - m.b + 16, "text-anchor": "middle"}, svg).textContent = a;
+  el("text", {x: (m.l + W - m.r) / 2, y: H - 2, "text-anchor": "middle"}, svg).textContent = "Actual input current, XPF readback (A)";
+  const color = v => rampAt(vs.length > 1 ? vs.indexOf(v) / (vs.length - 1) : 1, 3, 12);  // ordinal: skip steps too close to the surface
+  const xI = r => (typeof r.in_I_actual === "number" ? r.in_I_actual : r.set_I);  // actual input current
+  const series = vs.map(v => ({v, pts: pts.filter(r => r.set_V === v).sort((a, b) => xI(a) - xI(b))})).filter(s => s.pts.length);
+  const spV = live.set && live.set.V;
+  const clip = el("clipPath", {id: "lines-clip"}, el("defs", {}, svg));
+  el("rect", {x: m.l, y: m.t - 2, width: W - m.l - m.r, height: H - m.t - m.b + 4}, clip);
+  const plot = el("g", {"clip-path": "url(#lines-clip)"}, svg);
+  series.forEach(s => {
+    const d = s.pts.map((r, i) => `${i ? "L" : "M"}${x(xI(r)).toFixed(1)},${y(r.eff_bench * 100).toFixed(1)}`).join("");
+    el("path", {d, fill: "none", stroke: color(s.v), "stroke-width": s.v === spV ? 3 : 2, "stroke-linejoin": "round", "stroke-linecap": "round"}, plot);
+  });
+  $("#lines-sub").textContent = `One line per input voltage; ${dark() ? "lighter" : "darker"} = higher voltage, thick = voltage being swept. Bench efficiency (load / XPF); points below the axis are clipped.`;
+  // crosshair + tooltip
+  const cross = el("line", {y1: m.t, y2: H - m.b, stroke: css("--text-muted"), "stroke-width": 1, visibility: "hidden"}, svg);
+  const hit = el("rect", {x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent"}, svg);
+  hit.addEventListener("mousemove", ev => {
+    const b = svg.getBoundingClientRect(), px = (ev.clientX - b.left) * W / b.width;
+    const cur = Math.round(x.inv(px) * 10) / 10;
+    cross.setAttribute("x1", x(cur)); cross.setAttribute("x2", x(cur)); cross.setAttribute("visibility", "visible");
+    const lines = series.slice().reverse().map(s => {
+      const r = s.pts.reduce((b, p) => Math.abs(xI(p) - cur) < Math.abs(xI(b) - cur) ? p : b, s.pts[0]);
+      return Math.abs(xI(r) - cur) <= 0.3 ? `<span class="k">${s.v} V</span> ${pct(r.eff_bench)} <span class="k">at ${fmt(r.in_V_actual ?? r.set_V, 2)} V ${fmt(xI(r), 3)} A</span>` : null;
+    }).filter(Boolean);
+    showTip(ev, `<b>${cur.toFixed(1)} A</b><br>` + (lines.join("<br>") || '<span class="k">no data</span>'));
+  });
+  hit.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  $("#lines-legend").innerHTML = series.map(s => `<span><span class="sw" style="background:${color(s.v)}"></span>${s.v} V</span>`).join("");
+}
+
+// ---------- cross-reference small multiples ----------
+function drawCross(id, key, unit) {
+  const svg = $("#" + id); svg.innerHTML = "";
+  const W = 300, H = 150, m = {l: 44, r: 8, t: 8, b: 20};
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const pts = rows.map((r, i) => ({i, v: r[key], r})).filter(p => typeof p.v === "number");
+  if (!pts.length) { el("text", {x: m.l, y: 30}, svg).textContent = "no data yet"; return; }
+  let lo = Math.min(0, ...pts.map(p => p.v)), hi = Math.max(0, ...pts.map(p => p.v));
+  if (hi - lo < 1e-3) { lo -= 0.01; hi += 0.01; }
+  const x = linear(0, Math.max(1, rows.length - 1), m.l, W - m.r), y = linear(lo, hi, H - m.b, m.t);
+  niceTicks(lo, hi, 4).forEach(t => {
+    el("line", {x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), class: "gridline", stroke: t === 0 ? css("--text-muted") : null}, svg);
+    el("text", {x: m.l - 4, y: y(t) + 4, "text-anchor": "end"}, svg).textContent = t;
+  });
+  el("text", {x: W - m.r, y: H - 4, "text-anchor": "end"}, svg).textContent = "point #";
+  pts.forEach(p => {
+    const c = el("circle", {cx: x(p.i), cy: y(p.v), r: 2.5, fill: css("--series-1")}, svg);
+    const h = el("circle", {cx: x(p.i), cy: y(p.v), r: 6, fill: "transparent"}, svg);
+    h.addEventListener("mousemove", ev => showTip(ev, `<b>#${p.i}: ${p.r.set_V} V, ${p.r.set_I} A</b><br><span class="k">difference</span> ${fmt(p.v, 3)} ${unit}`));
+    h.addEventListener("mouseleave", hideTip);
+  });
+}
+
+// ---------- live power trace ----------
+function drawTrace() {
+  const svg = $("#trace"); svg.innerHTML = "";
+  const W = 460, H = 130, m = {l: 40, r: 8, t: 8, b: 18};
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const now = Date.now() / 1000, t0 = now - 60, pts = trace.filter(p => p.t >= t0);
+  if (!pts.length) { el("text", {x: m.l, y: 30}, svg).textContent = "no live data"; return; }
+  const hi = Math.max(5, ...pts.map(p => Math.max(p.pin, p.pout))) * 1.1;
+  const x = linear(t0, now, m.l, W - m.r), y = linear(0, hi, H - m.b, m.t);
+  niceTicks(0, hi, 4).forEach(t => {
+    el("line", {x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), class: "gridline"}, svg);
+    el("text", {x: m.l - 4, y: y(t) + 4, "text-anchor": "end"}, svg).textContent = t + " W";
+  });
+  [-60, -30, 0].forEach(s => el("text", {x: x(now + s), y: H - 4, "text-anchor": s === -60 ? "start" : s === 0 ? "end" : "middle"}, svg).textContent = s ? s + " s" : "now");
+  [["pin", "--series-1"], ["pout", "--series-2"]].forEach(([k, c]) => {
+    const d = pts.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p[k]).toFixed(1)}`).join("");
+    el("path", {d, fill: "none", stroke: css(c), "stroke-width": 2, "stroke-linejoin": "round"}, svg);
+  });
+}
+
+// ---------- tiles, status, table ----------
+function setText(id, v) { $(id).textContent = v; }
+function renderLive() {
+  const age = live.updated ? Date.now() / 1000 - live.updated : Infinity;
+  let st = live.status || "IDLE";
+  if (["RUNNING", "STARTING", "MONITOR", "FINISHING"].includes(st) && age > 5) st = "STALE";
+  const S = STATUS[st] || STATUS.IDLE, pill = $("#status");
+  pill.querySelector(".dot").style.background = css(S.c);
+  pill.querySelector(".dot").textContent = S.i;
+  pill.lastElementChild.textContent = S.t + (live.dry ? " (dry run)" : "");
+  $("#message").textContent = st === "STALE" ? `No update from sweep.py for ${age.toFixed(0)} s. Is it still running?` : (live.message || "");
+  if (live.n) {
+    const done = live.done || 0, el_s = Date.now() / 1000 - (live.t_start || Date.now() / 1000);
+    const k = Math.min(live.n, (live.k || 0) + (st === "RUNNING" ? 1 : 0));
+    const rate = k > 1 ? el_s / k : null, eta = rate ? (live.n - k) * rate : null;
+    const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+    setText("#progress-text", `${k} / ${live.n} points set, ${done} recorded · ${mmss(el_s)} elapsed` + (eta && st === "RUNNING" ? ` · about ${mmss(eta)} left (${rate.toFixed(1)} s/point)` : ""));
+    $("#progress-bar").style.width = (100 * k / live.n) + "%";
+  } else if (st === "MONITOR") { setText("#progress-text", "monitoring, not recording"); $("#progress-bar").style.width = "0%"; }
+
+  const sp = live.set, p = live.psu, m = live.mppt, L = live.load;
+  setText("#t-set", sp ? `${fmt(sp.V, 1)} V  ${fmt(sp.I, 1)} A` : "-");
+  setText("#t-set-d", sp ? `${fmt(sp.V * sp.I, 0)} W max` : " ");
+  if (p) {
+    const v = p.psu_V ?? (p.psu_V1 + p.psu_V2), i = p.psu_I ?? (p.psu_I1 + p.psu_I2) / 2;
+    setText("#t-psu", `${fmt(v, 2)} V  ${fmt(i, 3)} A`);
+    setText("#t-psu-d", `${fmt(v * i, 1)} W · ` + (live.channel ? `CH${live.channel} only` : `CH1 ${fmt(p.psu_V1, 2)} V, CH2 ${fmt(p.psu_V2, 2)} V`));
+  }
+  if (m) {
+    setText("#t-min", `${fmt(m.V_in, 2)} V  ${fmt(m.I_in, 3)} A`); setText("#t-min-d", `${fmt(m.P_in, 1)} W`);
+    setText("#t-mout", `${fmt(m.V_out, 2)} V  ${fmt(m.I_out, 3)} A`); setText("#t-mout-d", `${fmt(m.P_out, 1)} W`);
+    setText("#t-mode", m.fault === "OK" ? m.mode.split(" ")[0] : "FAULT");
+    setText("#t-mode-d", `fault ${m.fault} · heatsink ${fmt(m.T_heatsink, 1)} °C`);
+    $("#t-mode").style.color = m.fault === "OK" ? "" : css("--critical");
+    if (p && live.updated && (!trace.length || trace[trace.length - 1].t !== live.updated))
+      trace.push({t: live.updated, pout: m.P_out,
+                  pin: (p.psu_V ?? (p.psu_V1 + p.psu_V2)) * (p.psu_I ?? (p.psu_I1 + p.psu_I2) / 2)});
+    trace = trace.filter(q => q.t > Date.now() / 1000 - 65);
+  }
+  if (L) {
+    setText("#t-load", `${fmt(L.V, 2)} V  ${fmt(L.A, 3)} A`);
+    const a = L.t ? Date.now() / 1000 - L.t : null;
+    setText("#t-load-d", `${L.V != null && L.A != null ? fmt(L.V * L.A, 1) + " W · " : ""}` + (L.point ? `point ${L.point[0]} V ${L.point[1]} A` : a != null ? `read ${a.toFixed(0)} s ago` : ""));
+  }
+  const last = [...rows].reverse().find(r => typeof r.eff_bench === "number");
+  setText("#t-eff", last ? pct(last.eff_bench) : "-");
+  setText("#t-eff-d", last ? `telemetry ${pct(last.eff_mppt_telemetry)} · ${last.set_V} V ${last.set_I} A` : " ");
+  drawTrace();
+}
+function renderTable() {
+  const cols = [["set_V", "Set V", 1], ["set_I", "Set A", 1], ["in_V_actual", "In V", 2], ["in_I_actual", "In A", 3], ["P_in_psu", "P in W", 1], ["P_out_load", "P out W", 1], ["eff_bench", "Bench eff", "%"], ["eff_mppt_telemetry", "Telem. eff", "%"], ["mppt_V_out", "MPPT Vout", 2], ["load_V", "Load V", 2], ["load_A", "Load A", 3], ["settle_s", "Settle s", 2], ["mppt_mode", "Mode", null]];
+  const body = [...rows].reverse().slice(0, 200).map(r => "<tr>" + cols.map(([k, , d]) => `<td>${d === "%" ? pct(r[k]) : d === null ? (r[k] || "").split(" ")[0] : fmt(r[k], d)}</td>`).join("") + "</tr>").join("");
+  $("#table").innerHTML = "<thead><tr>" + cols.map(c => `<th>${c[1]}</th>`).join("") + "</tr></thead><tbody>" + body + "</tbody>";
+  setText("#table-sub", rows.length ? `${rows.length} points, newest first` : "no points yet");
+}
+function renderData() {
+  drawHeatmap(); drawLines();
+  drawCross("x-dVin", "dVin", "V"); drawCross("x-dIin", "dIin", "A");
+  drawCross("x-dVout", "dVout", "V"); drawCross("x-dIout", "dIout", "A");
+  renderTable();
+}
+
+// ---------- polling ----------
+async function pollLive() {
+  try { live = await (await fetch("/live.json", {cache: "no-store"})).json(); } catch (e) { live = {status: "STALE", message: "dashboard server not reachable"}; }
+  // with no camera there's no bench efficiency; show XPF in / MPPT out instead (once)
+  if (live.no_cam && metric === "eff_bench" && !pollLive.switched) {
+    pollLive.switched = true;
+    document.querySelector('#hm-metric [data-m="eff_psu_mppt"]').click();
+  }
+  renderLive();
+}
+let lastCount = -1, lastK = -1;
+async function pollData() {
+  try {
+    const d = await (await fetch("/data.json", {cache: "no-store"})).json();
+    rows = d.rows || [];
+    if (rows.length !== lastCount || live.k !== lastK) { lastCount = rows.length; lastK = live.k; renderData(); }
+  } catch (e) {}
+}
+function pollCam() {
+  const img = new Image();
+  img.onload = () => { $("#cam").src = img.src; setText("#cam-sub", "latest frame, " + new Date().toLocaleTimeString()); };
+  img.onerror = () => setText("#cam-sub", "no camera frame (camera runs during monitor and run)");
+  img.src = "/frame.jpg?t=" + Date.now();
+}
+$("#hm-metric").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  metric = b.dataset.m;
+  document.querySelectorAll("#hm-metric button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  drawHeatmap();
+});
+document.querySelectorAll("[data-theme-set]").forEach(b => b.addEventListener("click", () => {
+  const t = b.dataset.themeSet;
+  if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme");
+  localStorage.setItem("theme", t); renderData(); renderLive();
+}));
+const saved = new URLSearchParams(location.search).get("theme") ?? localStorage.getItem("theme"); if (saved) document.documentElement.setAttribute("data-theme", saved);
+pollLive(); pollData(); pollCam();
+setInterval(pollLive, 500); setInterval(pollData, 1500); setInterval(pollCam, 1000);
+setInterval(() => { if (live.set) drawHeatmap(); }, 1500);
+</script>
+</body>
+</html>

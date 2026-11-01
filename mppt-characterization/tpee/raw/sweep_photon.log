@@ -1,0 +1,24 @@
+17 points, 60->60 V, up to 7 A / 290 W
+no MPPT link: converter limits can't be checked; output protection relies on the converter's own output limit and the load
+XPF CH1 (MPPT supply): ON 11.99 V
+logging to sweep_photon_2132.csv
+converter drawing 0.97 A at 59.90 V after 0.3 s (no telemetry: output not verified)
+   60.0 V  0.2 A  settle 10.01s  queued strip 0000.png  in    6.8 W  stable 1 mpp 0 sweeps 0
+   60.0 V  0.5 A  settle 10.03s  queued strip 0001.png  in   17.5 W  stable 1 mpp 0 sweeps 0
+   60.0 V  0.8 A  settle 10.01s  queued strip 0002.png  in   29.6 W  stable 1 mpp 0 sweeps 0
+   60.0 V  1.0 A  settle 10.00s  queued strip 0003.png  in   42.6 W  stable 1 mpp 0 sweeps 0
+   60.0 V  1.2 A  settle 10.02s  queued strip 0004.png  in   59.3 W  stable 1 mpp 0 sweeps 0
+   60.0 V  1.5 A  settle 10.01s  queued strip 0005.png  in   75.7 W  stable 1 mpp 0 sweeps 0
+   60.0 V  1.8 A  settle 10.01s  queued strip 0006.png  in   88.7 W  stable 1 mpp 0 sweeps 0
+   60.0 V  2.0 A  settle 10.01s  queued strip 0007.png  in  101.9 W  stable 1 mpp 0 sweeps 0
+   60.0 V  2.2 A  settle 10.01s  queued strip 0008.png  in  114.7 W  stable 1 mpp 0 sweeps 0
+   60.0 V  2.5 A  settle 10.02s  queued strip 0009.png  in  127.7 W  stable 1 mpp 0 sweeps 0
+   60.0 V  2.8 A  settle 10.01s  queued strip 0010.png  in  162.8 W  stable 1 mpp 1 sweeps 0
+   60.0 V  3.0 A  settle 10.03s  queued strip 0011.png  in  178.0 W  stable 1 mpp 1 sweeps 0
+   60.0 V  3.2 A  settle 10.02s  queued strip 0012.png  in  192.1 W  stable 1 mpp 1 sweeps 0
+   60.0 V  3.5 A  settle 10.01s  queued strip 0013.png  in  198.0 W  stable 1 mpp 1 sweeps 0
+   60.0 V  3.8 A  settle 10.01s  queued strip 0014.png  in  198.8 W  stable 1 mpp 0 sweeps 0
+   60.0 V  4.0 A  settle 10.00s  queued strip 0015.png  in  199.7 W  stable 1 mpp 0 sweeps 0
+   60.0 V  4.2 A  settle 10.00s  queued strip 0016.png  in  200.8 W  stable 1 mpp 0 sweeps 0
+sweep done, XPF outputs off; waiting for remaining camera reads
+219 s elapsed

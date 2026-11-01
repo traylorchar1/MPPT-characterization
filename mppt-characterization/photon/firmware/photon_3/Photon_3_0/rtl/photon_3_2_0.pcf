@@ -1,0 +1,53 @@
+###IOSet List 5
+
+
+# 16MHz System Clock
+set_io sysclk 35 -io_std SB_LVCMOS -pullup no
+#promote_signal_gbuffered sysclk
+
+# Reset Signal
+set_io rst 20 -io_std SB_LVCMOS -pullup yes
+#promote_signal_gbuffered rst
+
+# SPI Signals
+set_io fpga_miso 14 -io_std SB_LVCMOS -pullup no
+set_io fpga_sck 15 -io_std SB_LVCMOS -pullup no
+set_io fpga_csn 16 -io_std SB_LVCMOS -pullup no
+set_io fpga_mosi 17 -io_std SB_LVCMOS -pullup no
+
+# DSP GPIO Signals
+set_io dsp_gpio_0 13 -io_std SB_LVCMOS -pullup yes
+set_io dsp_gpio_1 12 -io_std SB_LVCMOS -pullup yes
+set_io dsp_gpio_2 11 -io_std SB_LVCMOS -pullup no
+set_io dsp_gpio_3 10 -io_std SB_LVCMOS -pullup no
+
+# Relay Signals
+set_io relay_precharge 6 -io_std SB_LVCMOS -pullup no
+set_io relay_main 9 -io_std SB_LVCMOS -pullup no
+
+# Debug LEDs
+set_io led_dbg_0 48 -io_std SB_LVCMOS -pullup no
+set_io led_dbg_1 47 -io_std SB_LVCMOS -pullup no
+set_io led_dbg_2 46 -io_std SB_LVCMOS -pullup no
+set_io led_dbg_3 45 -io_std SB_LVCMOS -pullup no
+
+# Debug GPIO Signals
+set_io debug_gpio_0 38 -io_std SB_LVCMOS -pullup no
+set_io debug_gpio_1 37 -io_std SB_LVCMOS -pullup no
+
+# Power Control Signals
+set_io enable_gates 21 -io_std SB_LVCMOS -pullup no
+set_io fpga_enable 20 -io_std SB_LVCMOS -pullup no
+set_io fpga_fault 31 -io_std SB_LVCMOS -pullup no
+set_io gate_0 32 -io_std SB_LVCMOS -pullup no
+set_io gate_1 34 -io_std SB_LVCMOS -pullup no
+
+# Active High Comparator Inputs
+set_io v_cmp_0 2 -io_std SB_LVCMOS -pullup no
+set_io v_cmp_1 3 -io_std SB_LVCMOS -pullup no
+set_io i_cmp_0 26 -io_std SB_LVCMOS -pullup no
+set_io i_cmp_1 27 -io_std SB_LVCMOS -pullup no
+
+# Active Low Comparator Input
+set_io ov_cmp 28 -io_std SB_LVCMOS -pullup no 
+

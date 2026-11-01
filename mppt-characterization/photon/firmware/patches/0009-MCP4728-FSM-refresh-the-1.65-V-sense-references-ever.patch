@@ -1,0 +1,493 @@
+From 1d491b0ab0289aff717294c4485be1914e96a4c5 Mon Sep 17 00:00:00 2001
+From: Akhil Marri <akhilm28@stanford.edu>
+Date: Mon, 5 Oct 2026 23:46:28 -0700
+Subject: [PATCH 09/12] MCP4728 FSM: refresh the 1.65 V sense references every
+ 10th write so I2C corruption cannot latch a sense offset
+
+---
+ i2c.c | 475 ++++++++++++++++++++++++++++++----------------------------
+ 1 file changed, 242 insertions(+), 233 deletions(-)
+
+diff --git a/i2c.c b/i2c.c
+index 6c6954b..caf101c 100644
+--- a/i2c.c
++++ b/i2c.c
+@@ -1,233 +1,242 @@
+-/*******************************************************************************
+-i2c.c
+-Copyright (c) 2015, Samuel Lenius
+-All rights reserved.
+-
+-Redistribution and use in source and binary forms, with or without
+-modification, are permitted provided that the following conditions are met:
+-    * Redistributions of source code must retain the above copyright
+-      notice, this list of conditions and the following disclaimer.
+-    * Redistributions in binary form must reproduce the above copyright
+-      notice, this list of conditions and the following disclaimer in the
+-      documentation and/or other materials provided with the distribution.
+-    * Neither the name of UMNSVP nor the
+-      names of its contributors may be used to endorse or promote products
+-      derived from this software without specific prior written permission.
+-
+-THIS SOFTWARE IS PROVIDED BY DILITHIUM POWER SYSTEMS LLC ''AS IS'' AND ANY
+-EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-DISCLAIMED. IN NO EVENT SHALL DILITHIUM POWER SYSTEMS LLC BE LIABLE FOR ANY
+-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-*******************************************************************************/
+-
+-#include "i2c.h"
+-#include "main.h"
+-#include "leds.h"
+-#include "state.pb.h"
+-#include "params.pb.h"
+-#include "timer.h"
+-#include "../../dspic_include/i2c.h"
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-extern volatile StateMessage state;
+-extern volatile ParamsMessage params;
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-uint16 GetTemp(uint16 reg){
+-  uint16 temp;
+-
+-  IdleI2C1();
+-
+-  StartI2C1();
+-  while(I2C1CONbits.SEN);
+-  IFS1bits.MI2C1IF = 0;
+-  /* Write Slave address and set master for transmission */
+-  MasterWriteI2C1(TMP422_WRITE);
+-  /* Wait till address is transmitted */
+-  //while(I2C1STATbits.TBF);  // 8 clock cycles
+-  while(!IFS1bits.MI2C1IF); // Wait for 9th clock cycle
+-  IFS1bits.MI2C1IF = 0;     // Clear interrupt flag
+-  while(I2C1STATbits.ACKSTAT);
+-  /* Transmit string of data */
+-  MasterWriteI2C1(reg);
+-  StopI2C1();
+-  /* Wait till stop sequence is completed */
+-  while(I2C1CONbits.PEN);
+-  
+-  StartI2C1();
+-  while(I2C1CONbits.SEN);
+-  IFS1bits.MI2C1IF = 0;
+-  /* Write Slave address and set master for transmission */
+-  MasterWriteI2C1(TMP422_READ);
+-  /* Wait till address is transmitted */
+-  while(I2C1STATbits.TBF);  // 8 clock cycles
+-  while(!IFS1bits.MI2C1IF); // Wait for 9th clock cycle
+-  IFS1bits.MI2C1IF = 0;     // Clear interrupt flag
+-  while(I2C1STATbits.ACKSTAT);
+-  /* Transmit string of data */
+-  temp = MasterReadI2C1();
+-  StopI2C1();
+-  /* Wait till stop sequence is completed */
+-  while(I2C1CONbits.PEN);
+-
+-  return temp * 100;
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-uint8 TryI2CWriteByteNonBlocking(uint8 b){
+-  uint8 retcode = false;
+-  
+-  if(!I2C1STATbits.TBF){
+-    MasterWriteI2C1(b);
+-    retcode = true;
+-  }
+-
+-  return retcode;
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void I2CWriteByteBlocking(uint8 b, bool last_byte){
+-  
+-  MasterWriteI2C1(b);
+-
+-  while(!IFS1bits.MI2C1IF); // Wait for 9th clock cycle
+-  IFS1bits.MI2C1IF = 0;     // Clear interrupt flag
+- 
+-  if(last_byte){
+-    StopI2C1();
+-    /* Wait till stop sequence is completed */
+-    while(I2C1CONbits.PEN);
+-  }else{
+-    // Wait for the ack
+-    while(I2C1STATbits.ACKSTAT);
+-  }
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void SetDacVoltageMcp4728(uint8 ch, uint16 code){
+-
+-  union u_t code_u;
+-  code_u.u16[0] = code & 0x0fff;
+-  code_u.u8[1] |= 0x80; // OR in vref select to 2.048V reference
+-
+-  IdleI2C1();
+-
+-  StartI2C1();
+-  while(I2C1CONbits.SEN);
+-  IFS1bits.MI2C1IF = 0;
+- 
+-  I2CWriteByteBlocking(MCP4728_WRITE, False);
+-  I2CWriteByteBlocking(ch, False);
+-  I2CWriteByteBlocking(code_u.u8[1], False);
+-  I2CWriteByteBlocking(code_u.u8[0], True);
+-
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void Mcp4728ControlVoltageFSM(void){
+-  // Finite state machine to output the control voltages for current comparator
+-  
+-  static uint16 i2c_fsm_state = 0;
+-  static uint8 channel = 0;
+-  static uint8 channel_code = DAC_I_REF_0;
+-  static union u_t dac_code[2];
+-
+-  switch(i2c_fsm_state){
+-    case 0:
+-      // set the start bit
+-      IdleI2C1();
+-      StartI2C1();
+-      i2c_fsm_state = 1;
+-      break; 
+-    case 1:
+-      // send the address byte
+-      if(TryI2CWriteByteNonBlocking(MCP4728_WRITE)){
+-        i2c_fsm_state = 2;
+-      }      
+-      break; 
+-    case 2:
+-      // send dac current ref channel number
+-      channel_code = channel ? DAC_I_REF_1 : DAC_I_REF_0;
+-      if(TryI2CWriteByteNonBlocking(channel_code)){
+-        i2c_fsm_state = 3;
+-      }      
+-      break; 
+-    case 3:
+-      // load values to send
+-      dac_code[channel].u16[0] = state.chan[channel].dac;
+-      // send dac current ref channel msb
+-      if(TryI2CWriteByteNonBlocking(dac_code[channel].u8[1])){
+-        i2c_fsm_state = 4;
+-      }      
+-      break; 
+-    case 4:
+-      // send dac current ref channel lsb
+-      if(TryI2CWriteByteNonBlocking(dac_code[channel].u8[0])){
+-        StopI2C1();
+-        channel = channel ? 0 : 1;
+-        i2c_fsm_state = 0;
+-      }      
+-      break;
+-    default:
+-      i2c_fsm_state = 0;
+-      break;
+-  } 
+-    
+-   
+-
+-
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void InitI2C(uint16 speed){
+-
+-  //Configre SCA/SDA pin as open-drain
+-  ODCGbits.ODCG2 = 1;
+-  ODCGbits.ODCG3 = 1;
+-
+-  // Baud rate is set for 100 kHz
+-  // (((1 / 100000hz) - 120nanoseconds) 40e6hz / 2) - 2
+-  I2C1BRG = speed;
+-  // Configure I2C for 7 bit address mode
+-  IFS1bits.MI2C1IF = 0;
+-  I2C1CON = 0x0000;
+-  I2C1CONbits.I2CEN = 1;
+-
+-  delayMilliseconds(5);
+-
+-  if(params.device.hw_rev >= PHOTON_3_2){
+-    SetDacVoltageMcp4728(DAC_V_REF_0, (uint16)((1.65 / 2.048)*4096.0));
+-    SetDacVoltageMcp4728(DAC_V_REF_1, (uint16)((1.65 / 2.048)*4096.0));
+-    SetDacVoltageMcp4728(DAC_I_REF_0, 0x0);
+-    SetDacVoltageMcp4728(DAC_I_REF_1, 0x0);
+-  }else{
+-    state.temp_ambient = GetTemp(TMP422_LOCAL);
+-    state.chan[0].temp = GetTemp(TMP422_REM_0);
+-    state.chan[1].temp = GetTemp(TMP422_REM_1);
+-  }
+-
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
++/*******************************************************************************
++i2c.c
++Copyright (c) 2015, Samuel Lenius
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are met:
++    * Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++    * Redistributions in binary form must reproduce the above copyright
++      notice, this list of conditions and the following disclaimer in the
++      documentation and/or other materials provided with the distribution.
++    * Neither the name of UMNSVP nor the
++      names of its contributors may be used to endorse or promote products
++      derived from this software without specific prior written permission.
++
++THIS SOFTWARE IS PROVIDED BY DILITHIUM POWER SYSTEMS LLC ''AS IS'' AND ANY
++EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED. IN NO EVENT SHALL DILITHIUM POWER SYSTEMS LLC BE LIABLE FOR ANY
++DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++*******************************************************************************/
++
++#include "i2c.h"
++#include "main.h"
++#include "leds.h"
++#include "state.pb.h"
++#include "params.pb.h"
++#include "timer.h"
++#include "../../dspic_include/i2c.h"
++
++/******************************************************************************/
++/******************************************************************************/
++
++extern volatile StateMessage state;
++extern volatile ParamsMessage params;
++
++/******************************************************************************/
++/******************************************************************************/
++
++uint16 GetTemp(uint16 reg){
++  uint16 temp;
++
++  IdleI2C1();
++
++  StartI2C1();
++  while(I2C1CONbits.SEN);
++  IFS1bits.MI2C1IF = 0;
++  /* Write Slave address and set master for transmission */
++  MasterWriteI2C1(TMP422_WRITE);
++  /* Wait till address is transmitted */
++  //while(I2C1STATbits.TBF);  // 8 clock cycles
++  while(!IFS1bits.MI2C1IF); // Wait for 9th clock cycle
++  IFS1bits.MI2C1IF = 0;     // Clear interrupt flag
++  while(I2C1STATbits.ACKSTAT);
++  /* Transmit string of data */
++  MasterWriteI2C1(reg);
++  StopI2C1();
++  /* Wait till stop sequence is completed */
++  while(I2C1CONbits.PEN);
++  
++  StartI2C1();
++  while(I2C1CONbits.SEN);
++  IFS1bits.MI2C1IF = 0;
++  /* Write Slave address and set master for transmission */
++  MasterWriteI2C1(TMP422_READ);
++  /* Wait till address is transmitted */
++  while(I2C1STATbits.TBF);  // 8 clock cycles
++  while(!IFS1bits.MI2C1IF); // Wait for 9th clock cycle
++  IFS1bits.MI2C1IF = 0;     // Clear interrupt flag
++  while(I2C1STATbits.ACKSTAT);
++  /* Transmit string of data */
++  temp = MasterReadI2C1();
++  StopI2C1();
++  /* Wait till stop sequence is completed */
++  while(I2C1CONbits.PEN);
++
++  return temp * 100;
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++uint8 TryI2CWriteByteNonBlocking(uint8 b){
++  uint8 retcode = false;
++  
++  if(!I2C1STATbits.TBF){
++    MasterWriteI2C1(b);
++    retcode = true;
++  }
++
++  return retcode;
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++void I2CWriteByteBlocking(uint8 b, bool last_byte){
++  
++  MasterWriteI2C1(b);
++
++  while(!IFS1bits.MI2C1IF); // Wait for 9th clock cycle
++  IFS1bits.MI2C1IF = 0;     // Clear interrupt flag
++ 
++  if(last_byte){
++    StopI2C1();
++    /* Wait till stop sequence is completed */
++    while(I2C1CONbits.PEN);
++  }else{
++    // Wait for the ack
++    while(I2C1STATbits.ACKSTAT);
++  }
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++void SetDacVoltageMcp4728(uint8 ch, uint16 code){
++
++  union u_t code_u;
++  code_u.u16[0] = code & 0x0fff;
++  code_u.u8[1] |= 0x80; // OR in vref select to 2.048V reference
++
++  IdleI2C1();
++
++  StartI2C1();
++  while(I2C1CONbits.SEN);
++  IFS1bits.MI2C1IF = 0;
++ 
++  I2CWriteByteBlocking(MCP4728_WRITE, False);
++  I2CWriteByteBlocking(ch, False);
++  I2CWriteByteBlocking(code_u.u8[1], False);
++  I2CWriteByteBlocking(code_u.u8[0], True);
++
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++void Mcp4728ControlVoltageFSM(void){
++  // Finite state machine to output the control voltages for current comparator.
++  // Every tenth write refreshes one of the 1.65 V current/voltage sense
++  // references (channels A and B). They used to be written only at boot, so a
++  // corrupted I2C transfer under heavy switching could shift the sense offsets
++  // until the next reset; now any corruption heals within a few milliseconds.
++  static uint16 i2c_fsm_state = 0;
++  static uint8 slot = 0;
++  static uint8 channel_code = DAC_I_REF_0;
++  static union u_t dac_code;
++  const uint16 v_ref_code = (uint16)((1.65 / 2.048)*4096.0);
++
++  switch(i2c_fsm_state){
++    case 0:
++      // set the start bit
++      IdleI2C1();
++      StartI2C1();
++      i2c_fsm_state = 1;
++      break;
++    case 1:
++      // send the address byte
++      if(TryI2CWriteByteNonBlocking(MCP4728_WRITE)){
++        i2c_fsm_state = 2;
++      }
++      break;
++    case 2:
++      // pick the channel for this slot and latch its value
++      if(slot == 8){
++        channel_code = DAC_V_REF_0;
++        dac_code.u16[0] = v_ref_code;
++        dac_code.u8[1] |= 0x80;  // internal 2.048 V reference, as in InitI2C
++      }else if(slot == 9){
++        channel_code = DAC_V_REF_1;
++        dac_code.u16[0] = v_ref_code;
++        dac_code.u8[1] |= 0x80;
++      }else{
++        channel_code = (slot & 1) ? DAC_I_REF_1 : DAC_I_REF_0;
++        dac_code.u16[0] = state.chan[slot & 1].dac;
++      }
++      if(TryI2CWriteByteNonBlocking(channel_code)){
++        i2c_fsm_state = 3;
++      }
++      break;
++    case 3:
++      // send msb
++      if(TryI2CWriteByteNonBlocking(dac_code.u8[1])){
++        i2c_fsm_state = 4;
++      }
++      break;
++    case 4:
++      // send lsb
++      if(TryI2CWriteByteNonBlocking(dac_code.u8[0])){
++        StopI2C1();
++        if(++slot >= 10) slot = 0;
++        i2c_fsm_state = 0;
++      }
++      break;
++    default:
++      i2c_fsm_state = 0;
++      break;
++  }
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++void InitI2C(uint16 speed){
++
++  //Configre SCA/SDA pin as open-drain
++  ODCGbits.ODCG2 = 1;
++  ODCGbits.ODCG3 = 1;
++
++  // Baud rate is set for 100 kHz
++  // (((1 / 100000hz) - 120nanoseconds) 40e6hz / 2) - 2
++  I2C1BRG = speed;
++  // Configure I2C for 7 bit address mode
++  IFS1bits.MI2C1IF = 0;
++  I2C1CON = 0x0000;
++  I2C1CONbits.I2CEN = 1;
++
++  delayMilliseconds(5);
++
++  if(params.device.hw_rev >= PHOTON_3_2){
++    SetDacVoltageMcp4728(DAC_V_REF_0, (uint16)((1.65 / 2.048)*4096.0));
++    SetDacVoltageMcp4728(DAC_V_REF_1, (uint16)((1.65 / 2.048)*4096.0));
++    SetDacVoltageMcp4728(DAC_I_REF_0, 0x0);
++    SetDacVoltageMcp4728(DAC_I_REF_1, 0x0);
++  }else{
++    state.temp_ambient = GetTemp(TMP422_LOCAL);
++    state.chan[0].temp = GetTemp(TMP422_REM_0);
++    state.chan[1].temp = GetTemp(TMP422_REM_1);
++  }
++
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,78 @@
+Running in Lattice mode
+
+
+Starting:    /opt/lscc/iCEcube2.2017.01/synpbase/linux_a_64/mbin/synbatch
+Install:     /opt/lscc/iCEcube2.2017.01/synpbase
+Hostname:    office-linux
+Date:        Sat Apr  1 16:23:24 2017
+Version:     L-2016.09L+ice40
+
+Arguments:   -product synplify_pro -batch blinky_syn.prj
+ProductType: synplify_pro
+
+
+
+
+
+log file: "/home/sam/git/photon/software/photon_3/Photon_3_0/rtl/blinky/blinky/blinky_Implmnt/blinky.srr"
+Running: blinky_Implmnt in foreground
+
+Running blinky_syn|blinky_Implmnt
+
+Running: compile (Compile) on blinky_syn|blinky_Implmnt
+# Sat Apr  1 16:23:24 2017
+
+Running: compile_flow (Compile Process) on blinky_syn|blinky_Implmnt
+# Sat Apr  1 16:23:24 2017
+
+Running: compiler (Compile Input) on blinky_syn|blinky_Implmnt
+# Sat Apr  1 16:23:24 2017
+Copied /home/sam/git/photon/software/photon_3/Photon_3_0/rtl/blinky/blinky/blinky_Implmnt/synwork/blinky_comp.srs to /home/sam/git/photon/software/photon_3/Photon_3_0/rtl/blinky/blinky/blinky_Implmnt/blinky.srs
+
+compiler completed
+# Sat Apr  1 16:23:25 2017
+
+Return Code: 0
+Run Time:00h:00m:01s
+
+Running: multi_srs_gen (Multi-srs Generator) on blinky_syn|blinky_Implmnt
+# Sat Apr  1 16:23:25 2017
+
+multi_srs_gen completed
+# Sat Apr  1 16:23:25 2017
+
+Return Code: 0
+Run Time:00h:00m:00s
+Copied /home/sam/git/photon/software/photon_3/Photon_3_0/rtl/blinky/blinky/blinky_Implmnt/synwork/blinky_mult.srs to /home/sam/git/photon/software/photon_3/Photon_3_0/rtl/blinky/blinky/blinky_Implmnt/blinky.srs
+Complete: Compile Process on blinky_syn|blinky_Implmnt
+
+Running: premap (Pre-mapping) on blinky_syn|blinky_Implmnt
+# Sat Apr  1 16:23:25 2017
+
+premap completed
+# Sat Apr  1 16:23:25 2017
+
+Return Code: 0
+Run Time:00h:00m:00s
+Complete: Compile on blinky_syn|blinky_Implmnt
+
+Running: map (Map) on blinky_syn|blinky_Implmnt
+# Sat Apr  1 16:23:25 2017
+License granted for 4 parallel jobs
+
+Running: fpga_mapper (Map & Optimize) on blinky_syn|blinky_Implmnt
+# Sat Apr  1 16:23:25 2017
+Copied /home/sam/git/photon/software/photon_3/Photon_3_0/rtl/blinky/blinky/blinky_Implmnt/synwork/blinky_m.srm to /home/sam/git/photon/software/photon_3/Photon_3_0/rtl/blinky/blinky/blinky_Implmnt/blinky.srm
+
+fpga_mapper completed with warnings
+# Sat Apr  1 16:23:26 2017
+
+Return Code: 1
+Run Time:00h:00m:01s
+Complete: Map on blinky_syn|blinky_Implmnt
+Complete: Logic Synthesis on blinky_syn|blinky_Implmnt
+
+exit status=0
+
+exit status=0
+

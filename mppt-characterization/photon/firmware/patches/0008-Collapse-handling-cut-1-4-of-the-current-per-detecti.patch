@@ -1,0 +1,34 @@
+From fce4cb4a59ace7d516e656f3ff41dfa4fe2eb92f Mon Sep 17 00:00:00 2001
+From: Akhil Marri <akhilm28@stanford.edu>
+Date: Mon, 5 Oct 2026 23:15:15 -0700
+Subject: [PATCH 08/12] Collapse handling: cut 1/4 of the current per detection
+ instead of restarting from minimum
+
+---
+ tracker.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/tracker.c b/tracker.c
+index f037c54..e39046c 100644
+--- a/tracker.c
++++ b/tracker.c
+@@ -701,11 +701,12 @@ void ControlVoltages(void){
+           state.chan[c].i_term += acc >> 8;
+           i_frac[c] = acc & 0xff;
+           // Collapse: input below half the goal means the current command is
+-          // far above what the source can supply (e.g. its current limit just
+-          // dropped). Restart from minimum current; the source recovers and
+-          // P&O ramps back up from its side.
++          // above what the source can supply (its current limit, or a sweep
++          // that pushed past it). Cut a quarter of the current each time this
++          // is seen; the source recovers within a few cuts without ramping
++          // all the way back up from minimum.
+           if(state.chan[c].v_raw < state.chan[c].v_goal_raw / 2){
+-            state.chan[c].i_term = MINDAC;
++            state.chan[c].i_term -= (state.chan[c].i_term - MINDAC) >> 2;
+             i_frac[c] = 0;
+           }
+           if(state.chan[c].i_term != LimitDac(state.chan[c].i_term)){
+-- 
+2.50.1 (Apple Git-155)
+

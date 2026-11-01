@@ -1,0 +1,60 @@
+syntax = "proto2";
+
+import "nanopb.proto";
+
+message ParamsMessage {
+  optional DeviceParams device = 1;
+  optional CommParams comm = 2; 
+  optional ThermistorParams thermistor = 3;
+  optional CodeParams code = 4;
+  repeated ChannelParams chan = 5 [(nanopb).max_count = 2];
+  optional TrackerParams track = 6;
+}
+
+message ThermistorParams {
+  optional float beta = 1 [default=3435];
+  optional float t_o = 2 [default=25.0];
+  optional float r_o = 3 [default=10000];
+  optional float r_bias = 4 [default=4990];
+}
+
+message DeviceParams {
+  optional int32 serial_number = 1;
+  optional int32 hw_rev = 2;
+  optional float v_scale = 3 [default=0.020391517]; 
+  optional float i_scale = 4 [default=0.00048828125]; 
+  optional float v_cv_charge = 5 [default=100.0]; 
+  optional float v_cv_charge_hyst = 6 [default=1.0];
+  optional string customer = 7 [(nanopb).max_size = 40, default=""];
+}
+
+message TrackerParams{
+  optional int32 po_step_size = 1 [default=8];
+  optional int32 min_retrack_time = 2 [default=6000]; // units = 20ms
+  optional float voltage_hyst = 3 [default=1.0];
+}
+
+message ChannelParams{
+  optional float v_scale = 1 [default=0.020391517]; // 1.0 / (6.13 * 8.0)
+  optional float i_scale = 2 [default=0.0009765625]; // 1.0 / (128.0 * 8.0)
+}
+
+message CommParams {
+  optional int32 can_bitrate = 1 [default=500000];
+  optional int32 can_base_addr = 2 [default=0x600];
+  optional int32 debug_baudrate = 3 [default=230400];
+  optional bool debug_mode = 4 [default=false];
+  optional int32 msg_divisor = 5 [default=0];
+}
+
+message CodeParams {
+  optional int32 crc32 = 1;
+  optional int32 bitstream_crc32 = 2;
+}
+
+
+
+
+
+
+

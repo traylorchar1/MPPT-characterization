@@ -1,0 +1,32 @@
+From 98de4acbfbcc7fe3ae6c793aea03d6052913e612 Mon Sep 17 00:00:00 2001
+From: Akhil Marri <akhilm28@stanford.edu>
+Date: Mon, 5 Oct 2026 23:00:36 -0700
+Subject: [PATCH 07/12] Reset integrator to minimum current when input
+ collapses below half the goal
+
+---
+ tracker.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/tracker.c b/tracker.c
+index 27cc8a7..f037c54 100644
+--- a/tracker.c
++++ b/tracker.c
+@@ -700,6 +700,14 @@ void ControlVoltages(void){
+           acc = (state.chan[c].v_error_raw * 256) / photon_tuning.i_divisor + i_frac[c];
+           state.chan[c].i_term += acc >> 8;
+           i_frac[c] = acc & 0xff;
++          // Collapse: input below half the goal means the current command is
++          // far above what the source can supply (e.g. its current limit just
++          // dropped). Restart from minimum current; the source recovers and
++          // P&O ramps back up from its side.
++          if(state.chan[c].v_raw < state.chan[c].v_goal_raw / 2){
++            state.chan[c].i_term = MINDAC;
++            i_frac[c] = 0;
++          }
+           if(state.chan[c].i_term != LimitDac(state.chan[c].i_term)){
+             state.chan[c].i_term = LimitDac(state.chan[c].i_term);
+             i_frac[c] = 0;
+-- 
+2.50.1 (Apple Git-155)
+

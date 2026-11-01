@@ -1,0 +1,35 @@
+From 999620bafbe4f24829f13dd2bd3136bc9ef28c49 Mon Sep 17 00:00:00 2001
+From: Akhil Marri <akhilm28@stanford.edu>
+Date: Wed, 7 Oct 2026 23:24:51 -0700
+Subject: [PATCH 12/12] Collapse ceiling from the onset level (-1.5%), not from
+ the post-cut level
+
+---
+ tracker.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/tracker.c b/tracker.c
+index 5340685..90d47df 100644
+--- a/tracker.c
++++ b/tracker.c
+@@ -729,11 +729,14 @@ void ControlVoltages(void){
+           // Collapse: input below half the goal means the current command is
+           // above what the source can supply (its current limit, or a sweep
+           // that pushed past it). Cut 1/32 of the current every 5 ms until
+-          // the source recovers, and remember that level as a ceiling so the
+-          // loop settles just under the limit instead of colliding with it.
++          // the source recovers. The ceiling is taken once, 1.5 % below the
++          // level where the collapse started, so the cuts made while the
++          // source recovers do not drag it down.
+           if(state.chan[c].v_raw < state.chan[c].v_goal_raw / 2){
++            if(since_collapse[c] > 0){
++              soft_max[c] = state.chan[c].i_term - (state.chan[c].i_term - MINDAC) / 64;
++            }
+             state.chan[c].i_term -= (state.chan[c].i_term - MINDAC) >> 5;
+-            soft_max[c] = state.chan[c].i_term;
+             since_collapse[c] = 0;
+             i_frac[c] = 0;
+           }
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,92 @@
+From 5f25b5e96676bb3e6bf2e4e2c364595090c2340e Mon Sep 17 00:00:00 2001
+From: Akhil Marri <akhilm28@stanford.edu>
+Date: Wed, 7 Oct 2026 23:21:14 -0700
+Subject: [PATCH 11/12] Learn the source current limit on collapse: 1/32 cuts
+ plus a soft ceiling that re-probes with accelerating creep
+
+---
+ photon_fields.inc |  1 +
+ tracker.c         | 29 +++++++++++++++++++++++++----
+ 2 files changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/photon_fields.inc b/photon_fields.inc
+index f63dd88..093b920 100644
+--- a/photon_fields.inc
++++ b/photon_fields.inc
+@@ -26,3 +26,4 @@ TUNE(1120, hold_v_raw, 0, 0, 5912)          /* 0 = track; otherwise hold this in
+ TUNE(1121, stream, 0, 0, 1)                 /* 1 = send tracker debug frames on base+0xE1/0xE2 at 50 Hz */
+ TUNE(1122, max_dac, 2023, 64, 2400)         /* input current ceiling, DAC counts (2023 ~ 7.5 A, ~3.7 mA/count); rev 3.2+ */
+ TUNE(1123, oc_arr_raw, 8192, 1024, 9216)    /* array overcurrent trip, Photon-measured counts (8192 = 8.0 A, 9216 = 9.0 A) */
++TUNE(1124, ceiling_creep, 2, 0, 100)         /* learned current ceiling after a source collapse rises this many DAC counts per P&O period */
+diff --git a/tracker.c b/tracker.c
+index 2613a2a..5340685 100644
+--- a/tracker.c
++++ b/tracker.c
+@@ -69,6 +69,9 @@ static int32 po_acc_v[2], po_acc_i[2], po_acc_n[2];
+ static bool po_accumulate[2];
+ // Fractional part of the PI integrator, 1/256 DAC counts.
+ static int16 i_frac[2];
++// Current ceiling learned from source collapses (DAC counts); creeps back up.
++static int32 soft_max[2] = {4095, 4095};
++static int16 since_collapse[2];
+ 
+ static void PoReset(uint8 c){
+   po_tick[c] = 0;
+@@ -111,6 +114,7 @@ void InitTracker(void){
+ 
+ 
+   state.max_dac = MAXDAC;
++  soft_max[0] = soft_max[1] = MAXDAC;
+   state.control = ControlEnum_INIT;
+ }
+ 
+@@ -123,6 +127,7 @@ void TrackerApplyMaxDac(void){
+     MAXDAC = photon_tuning.max_dac;
+     state.max_dac = MAXDAC;
+   }
++  soft_max[0] = soft_max[1] = state.max_dac;
+ }
+ 
+ /******************************************************************************/
+@@ -596,6 +601,16 @@ void PerturbObserve(uint8 c){
+ 
+   po_accumulate[c] = false;
+   po_tick[c] = 0;
++  // Re-probe the learned ceiling: slowly right after a collapse, doubling
++  // every 10 periods without one (so a raised source limit is followed in
++  // seconds), and quickly when the loop is not pressing against it.
++  if(since_collapse[c] < 1000) since_collapse[c]++;
++  if(state.chan[c].i_term < soft_max[c] - 16){
++    soft_max[c] += 64;
++  }else{
++    soft_max[c] += photon_tuning.ceiling_creep << MIN(since_collapse[c] / 10, 5);
++  }
++  soft_max[c] = MIN(soft_max[c], state.max_dac);
+   if(po_acc_n[c] == 0) return;
+   v_avg = po_acc_v[c] / po_acc_n[c];
+   i_avg = po_acc_i[c] / po_acc_n[c];
+@@ -713,11 +728,17 @@ void ControlVoltages(void){
+           i_frac[c] = acc & 0xff;
+           // Collapse: input below half the goal means the current command is
+           // above what the source can supply (its current limit, or a sweep
+-          // that pushed past it). Cut a quarter of the current each time this
+-          // is seen; the source recovers within a few cuts without ramping
+-          // all the way back up from minimum.
++          // that pushed past it). Cut 1/32 of the current every 5 ms until
++          // the source recovers, and remember that level as a ceiling so the
++          // loop settles just under the limit instead of colliding with it.
+           if(state.chan[c].v_raw < state.chan[c].v_goal_raw / 2){
+-            state.chan[c].i_term -= (state.chan[c].i_term - MINDAC) >> 2;
++            state.chan[c].i_term -= (state.chan[c].i_term - MINDAC) >> 5;
++            soft_max[c] = state.chan[c].i_term;
++            since_collapse[c] = 0;
++            i_frac[c] = 0;
++          }
++          if(state.chan[c].i_term > soft_max[c]){
++            state.chan[c].i_term = soft_max[c];
+             i_frac[c] = 0;
+           }
+           if(state.chan[c].i_term != LimitDac(state.chan[c].i_term)){
+-- 
+2.50.1 (Apple Git-155)
+

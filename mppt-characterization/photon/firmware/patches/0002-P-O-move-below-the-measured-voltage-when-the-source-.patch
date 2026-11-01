@@ -1,0 +1,104 @@
+From 3ac0cc2c8ed25fb2d21a293614af0d2803f03fda Mon Sep 17 00:00:00 2001
+From: Akhil Marri <akhilm28@stanford.edu>
+Date: Mon, 5 Oct 2026 22:21:54 -0700
+Subject: [PATCH 02/12] P&O: move below the measured voltage when the source
+ cannot reach the goal; drop stale Voc/Vsc window; cap step at 3% of Vin
+
+---
+ photon_fields.inc |  2 +-
+ tracker.c         | 48 +++++++++++++++++++++++++----------------------
+ 2 files changed, 27 insertions(+), 23 deletions(-)
+
+diff --git a/photon_fields.inc b/photon_fields.inc
+index 4b61804..b1f1394 100644
+--- a/photon_fields.inc
++++ b/photon_fields.inc
+@@ -19,7 +19,7 @@ TUNE(1113, power_drop_percent, 50, 1, 99)
+ TUNE(1114, po_period_ticks, 5, 2, 100)      /* P&O: one perturbation per period */
+ TUNE(1115, po_settle_ticks, 2, 0, 99)       /* P&O: ticks ignored after each step before averaging */
+ TUNE(1116, po_step_min, 12, 1, 500)         /* P&O: step after a reversal (~0.25 V) */
+-TUNE(1117, po_step_max, 200, 1, 1000)       /* P&O: step after repeated same-direction gains (~4 V) */
++TUNE(1117, po_step_max, 100, 1, 1000)       /* P&O: largest step after repeated same-direction gains (~2 V) */
+ TUNE(1118, po_up_clamp, 24, 1, 1000)        /* P&O: goal may not exceed measured V by more than this */
+ TUNE(1119, po_down_clamp, 100, 1, 2000)     /* P&O: goal may not fall below measured V by more than this */
+ TUNE(1120, hold_v_raw, 0, 0, 5912)          /* 0 = track; otherwise hold this input voltage */
+diff --git a/tracker.c b/tracker.c
+index cb2f1aa..35f7621 100644
+--- a/tracker.c
++++ b/tracker.c
+@@ -568,6 +568,8 @@ void IncrementalConductance(uint8 c){
+ // direction keeps gaining. The goal is clamped close to the measured voltage
+ // so that, against a source whose voltage cannot follow (e.g. a supply in
+ // constant voltage), the PI loop cannot wind away from the operating point.
++// No Voc/Vsc window here: those come from the last sweep and go stale when the
++// source changes; the sweep and periodic retrack still use them.
+ void PerturbObserve(uint8 c){
+   int32 p, v_avg, i_avg, step, lo, hi;
+   int16 tick = ++po_tick[c];
+@@ -590,15 +592,31 @@ void PerturbObserve(uint8 c){
+   p = v_avg * i_avg;
+ 
+   step = po_step[c];
+-  if(po_have_prev[c]){
+-    if(p < po_p_prev[c]){
+-      state.chan[c].dir = SwitchDirection(state.chan[c].dir);
+-      step = photon_tuning.po_step_min;
+-      po_run[c] = 0;
+-    }else if(++po_run[c] >= 2){
+-      step = MIN(step * 2, photon_tuning.po_step_max);
++  if(v_avg < state.chan[c].v_goal_raw - photon_tuning.po_step_min / 2){
++    // The source is not reaching the goal (e.g. a supply in constant
++    // voltage): power comparisons carry no information here, so always move
++    // the goal below what the source actually delivers.
++    state.chan[c].v_goal_raw = v_avg;
++    state.chan[c].dir = TrackingDirectionEnum_DOWN;
++    step = photon_tuning.po_step_min;
++    po_run[c] = 0;
++    po_clamp[c] = 1;
++  }else{
++    po_clamp[c] = 0;
++    if(po_have_prev[c]){
++      if(p < po_p_prev[c]){
++        state.chan[c].dir = SwitchDirection(state.chan[c].dir);
++        step = photon_tuning.po_step_min;
++        po_run[c] = 0;
++      }else if(++po_run[c] >= 2){
++        step = step * 2;
++      }
+     }
+   }
++  // Large steps only while far from the operating point, and never more than
++  // about 3 % of the input voltage.
++  step = MIN(step, photon_tuning.po_step_max);
++  step = MIN(step, MAX(photon_tuning.po_step_min, v_avg >> 5));
+   po_step[c] = step;
+   po_p_prev[c] = p;
+   po_have_prev[c] = 1;
+@@ -610,23 +628,9 @@ void PerturbObserve(uint8 c){
+   }
+ 
+   // Keep the goal near what the source actually delivers.
+-  po_clamp[c] = 0;
+   hi = v_avg + photon_tuning.po_up_clamp;
+   lo = v_avg - photon_tuning.po_down_clamp;
+-  if(state.chan[c].v_goal_raw > hi){ state.chan[c].v_goal_raw = hi; po_clamp[c] = 1; }
+-  if(state.chan[c].v_goal_raw < lo){ state.chan[c].v_goal_raw = lo; po_clamp[c] = 1; }
+-
+-  // Array window: retrack if pinned at either end for long enough.
+-  if(state.chan[c].v_goal_raw <= state.chan[c].vsc_raw){
+-    MaybeInitiateRetrack();
+-    state.chan[c].v_goal_raw = state.chan[c].vsc_raw;
+-    state.chan[c].dir = TrackingDirectionEnum_UP;
+-  }
+-  if(state.chan[c].v_goal_raw >= state.chan[c].voc_raw){
+-    MaybeInitiateRetrack();
+-    state.chan[c].v_goal_raw = state.chan[c].voc_raw;
+-    state.chan[c].dir = TrackingDirectionEnum_DOWN;
+-  }
++  state.chan[c].v_goal_raw = MAX(lo, MIN(hi, state.chan[c].v_goal_raw));
+   state.chan[c].v_goal_raw = MAX(MINVOLT, MIN(MAXVOLT, state.chan[c].v_goal_raw));
+   if(p <= ((state.chan[c].p_raw_sweep_mpp / 100) * photon_tuning.power_drop_percent)){
+     MaybeInitiateRetrack();
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,115 @@
+syntax = "proto2";
+
+import "nanopb.proto";
+
+message StateMessage {
+  optional int32 sequence = 1;
+  optional int32 batt_v_raw = 2;
+  optional int32 batt_i_raw = 3;
+  optional int32 temp_ambient = 4;
+  
+  optional SafetyEnum safety = 5;
+  optional ControlEnum control = 6;
+  optional RelayEnum precharge = 7;
+  optional RelayEnum main = 8;
+  optional int32 loops = 9;
+  optional int32 precharge_loops = 10;
+  optional int32 precharge_adc = 11;
+
+  optional int32 batt_p_raw = 12;
+  optional int32 batt_p_last_raw = 13;
+
+  optional int32 dbg = 14;
+  optional int32 t_raw = 15;
+  repeated TrackerChannel chan = 16 [(nanopb).max_count = 2];
+  optional AlgorithmEnum alg = 17;
+  optional int32 max_dac = 18;
+  optional float batt_v = 19;
+  optional float batt_i = 20;
+  optional bool fpga_fault = 21;
+  optional int32 n_burst_pkts = 22;
+  optional int32 burst_pkts_ch = 23;
+}
+
+message TrackerChannel {
+  optional int32 v_raw = 1;
+  optional int32 v_raw_last_change = 2;
+  optional int32 v_goal_raw = 3;
+  optional int32 v_error_raw = 4;
+  optional int32 p_term = 5;
+  optional int32 i_term = 6;
+  optional int32 i_raw = 7;
+  optional int32 p_raw = 8;
+  optional int32 p_last_raw = 9;
+  optional int32 temp = 10;
+  optional int32 dac = 11;
+  optional TrackingDirectionEnum dir = 12; 
+  optional int32 dbg = 13;
+  optional int32 period = 14;
+  optional int32 t_raw = 15;
+  optional float v_last = 16;
+  optional float i_last = 17;
+  optional float v_delta = 18;
+  optional float i_delta = 19;
+  optional float iv = 20;
+  optional float didv = 21;
+  optional int32 p_raw_sweep_mpp = 22;
+  optional int32 v_raw_sweep_mpp = 23;
+  optional int32 v_raw_sweep_done = 24;
+  optional bool sweep_done = 25;
+  optional int32 v_raw_voc = 26;
+  optional int32 voc_raw = 27;
+  optional int32 vsc_raw = 28;
+  optional float v = 29;
+  optional float i = 30;
+  optional int32 p_last_change_raw = 31;
+}
+
+enum RelayEnum {
+  OPEN = 0;
+  CLOSED = 1;
+}
+
+enum TrackingDirectionEnum {
+  UP = 0;
+  DOWN = 1;
+}
+  
+enum SafetyEnum {
+  NO_ERROR = 0;  
+  COMP_OV = 1;
+  BATT_OV = 2;
+  ARR_0_OV = 3;
+  ARR_1_OV = 4;
+    
+  BATT_OC = 5;
+  ARR_0_OC = 6;
+  ARR_1_OC = 7;
+
+  AMB_OT = 8;
+  ARR_0_OT = 9;
+  ARR_1_OT = 10;
+}
+  
+enum ControlEnum {
+  INIT = 0;
+  PRECHARGING = 1;
+  CLOSING_MAIN = 2;
+  STARTING = 3;
+  CAN_DISABLE = 4;
+  TRACKING = 5;
+  ERROR_OPEN_RELAY = 6;
+  ERROR_CLOSED_RELAY = 7;
+  TEST_DAC_STEP = 8;
+  TEST_CONTROL_VOLTAGE = 9;
+  TEST_MODE = 10;
+  CONSTANT_VOLTAGE = 11;
+}
+
+enum AlgorithmEnum {
+  SWEEP = 0;
+  PERTURB_OBSERVE = 1;
+  INCREMENTAL_CONDUCTANCE = 2;
+  MEASURE_VOC = 3;
+}
+

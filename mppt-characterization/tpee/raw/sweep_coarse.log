@@ -1,0 +1,23 @@
+114 points, 60->10 V, up to 7 A / 290 W
+MPPT SEC-B175-7A fw 1.12: Vout_limit 147 V, Vin_limit 90 V, Iin_max 8.0 A, fault OK
+logging to sweep_coarse_2328.csv
+MPPT up: output 112.0 V after 0.6 s
+   60.0 V  0.5 A  settle 28.22s  in   28.6 W  out   27.1 W  eff 0.94843  telemetry eff 1.27571  CIV (input voltage ctrl)
+   60.0 V  1.0 A  settle 11.02s  in   58.9 W  out   57.1 W  eff 0.96871  telemetry eff 1.12192  CIV (input voltage ctrl)
+   60.0 V  1.5 A  settle 13.04s  in   89.1 W  out   86.9 W  eff 0.97586  telemetry eff 1.06165  CIV (input voltage ctrl)
+   60.0 V  2.0 A  settle 20.16s  in  119.7 W  out  117.5 W  eff 0.98159  telemetry eff 1.05917  CIV (input voltage ctrl)
+   60.0 V  2.5 A  settle 15.13s  in  148.8 W  out  146.1 W  eff 0.98223  telemetry eff 1.05135  CIV (input voltage ctrl)
+   60.0 V  3.0 A  settle 20.21s  in  180.9 W  out  176.5 W  eff 0.97607  telemetry eff 1.04855  CIV (input voltage ctrl)
+   55.0 V  0.5 A  settle 10.01s  in   25.6 W  out    0.0 W  eff 1.02752  telemetry eff 1.25067  CIV (input voltage ctrl)
+   55.0 V  1.0 A  settle 14.08s  in   54.4 W  out    0.0 W  eff 0.94291  telemetry eff 1.10633  CIV (input voltage ctrl)
+   55.0 V  1.5 A  settle 13.04s  in   91.2 W  out    0.0 W  eff 0.84291  telemetry eff 1.09173  CIV (input voltage ctrl)
+   55.0 V  2.0 A  settle 20.21s  in  108.9 W  out    0.0 W  eff 0.99412  telemetry eff 1.06184  CIV (input voltage ctrl)
+   55.0 V  2.5 A  settle 10.02s  in  136.2 W  out    0.0 W  eff 0.99675  telemetry eff 1.06105  CIV (input voltage ctrl)
+   55.0 V  3.0 A  settle 11.01s  in  163.6 W  out    0.0 W  eff 0.97481  telemetry eff 1.0402  CIV (input voltage ctrl)
+   50.0 V  0.5 A  settle 10.01s  in   23.8 W  out   22.3 W  eff 0.93545  telemetry eff 1.29631  CIV (input voltage ctrl)
+   50.0 V  1.0 A  settle 12.08s  in   48.9 W  out   47.4 W  eff 0.96949  telemetry eff 1.15472  CIV (input voltage ctrl)
+   50.0 V  1.5 A  settle 10.02s  in   76.8 W  out   72.1 W  eff 0.94319  telemetry eff 1.09782  CIV (input voltage ctrl)
+   50.0 V  2.0 A  settle 20.16s  in   99.8 W  out   97.0 W  eff 0.97221  telemetry eff 1.08674  CIV (input voltage ctrl)
+
+stopped by user; XPF outputs turned OFF.
+302 s elapsed

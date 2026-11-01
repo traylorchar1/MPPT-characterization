@@ -1,0 +1,10 @@
+*.o
+*.d
+*.cof
+*.hex
+!rtl/*.hex
+!release/*.hex
+*.map
+*.lst
+__pycache__/
+.DS_Store

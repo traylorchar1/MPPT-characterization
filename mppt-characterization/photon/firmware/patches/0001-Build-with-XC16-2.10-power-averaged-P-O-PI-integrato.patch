@@ -1,0 +1,3169 @@
+From 19a3b5e62f3ef56a6fd3ebe8ef9bfaf91643279b Mon Sep 17 00:00:00 2001
+From: Akhil Marri <akhilm28@stanford.edu>
+Date: Mon, 5 Oct 2026 22:10:15 -0700
+Subject: [PATCH 01/12] Build with XC16 2.10; power-averaged P&O, PI integrator
+ remainder, goal clamps, hold mode; compact CAN service
+
+- periph_compat.c replaces the COFF-only legacy peripheral library
+- drop protobuf state stream (pb_encode) to fit program memory
+- photon_service: table-driven registers, live-writable TUNE block, debug stream on base+0xE1/0xE2
+---
+ Makefile          |  138 ++---
+ debug.c           |  271 ++++-----
+ main.c            |  304 +++++-----
+ packet.c          |  412 ++++++-------
+ periph_compat.c   |  107 ++++
+ photon_fields.inc |  131 +----
+ photon_service.c  |  218 +++++--
+ photon_service.h  |   10 +-
+ tracker.c         | 1424 +++++++++++++++++++++++----------------------
+ 9 files changed, 1562 insertions(+), 1453 deletions(-)
+ create mode 100644 periph_compat.c
+
+diff --git a/Makefile b/Makefile
+index ecad17c..e681cc1 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,69 +1,69 @@
+-# MPLAB IDE generated this makefile for use with GNU make.
+-# Project: photon 1_4.mcp
+-# Date: Mon May 19 22:53:17 2014
+-
+-AS = xc16-as 
+-CC = xc16-gcc
+-LD = xc16-ld 
+-AR = xc16-ar
+-HX = xc16-bin2hex
+-RM = rm
+-CFLAGS = -mcpu=33FJ64GS606 -x c -g -Wall -merrata=psv_trap -O1 -mlarge-data -fgnu89-inline
+-AFLAGS = -mcpu=33FJ64GS606 -Wa,-ahmcls=$*.lst
+-LFLAGS = -o "fw.cof" -Wl,--script="../../dspic_include/p33FJ64GS606_main.gld",--defsym=__MPLAB_BUILD=1,--heap=512,-Map="fw.map",--report-mem
+-OBJS := photon_service.o adc.o can.o cobs.o debug.o fifo.o fpga.o general.o i2c.o leds.o main.o oscillator.o pwm.o queue.o timer.o tracker.o packet.o safety.o comparator.o fram.o params.pb.o state.pb.o pb_encode.o pb_decode.o pb_common.o thermistor.o
+-
+-NANOPB_DIR = ../../nanopb
+-VPATH = $(NANOPB_DIR)
+-
+-INC := $(NANOPB_DIR) ../../dspic_include
+-INCLUDES := $(addprefix -I,$(INC))
+-
+-
+-# from http://scottmcpeak.com/autodepend/autodepend.html
+-
+-# make hex
+-fw.hex : fw.cof
+-	$(HX) "fw.cof"
+-
+-# link
+-fw.cof : $(OBJS)
+-	$(CC) -mcpu=33FJ64GS606 $(OBJS) $(LFLAGS)
+-ifneq ($(filter clean,$(MAKECMDGOALS)),clean)
+--include $(OBJS:.o=.d)
+-endif
+-
+-# compile
+-%.o : %.c state.pb.h params.pb.h
+-	$(CC) -c $(CFLAGS) $< -o $*.o $(INCLUDES)
+-	$(CC) -MM $(CFLAGS) $< $(INCLUDES) > $*.d
+-
+-# assemble
+-%.o : %.s
+-	$(CC) $(AFLAGS) -c $*.s -o $*.o 
+-
+-python/log_pb2.py : log.proto
+-	protoc -I /usr/include -I $(NANOPB_DIR)/generator/proto -I . --python_out=python/ log.proto
+-
+-params.pb : params.proto
+-	protoc -I /usr/include -I $(NANOPB_DIR)/generator/proto -I . -o params.pb params.proto
+-	protoc -I /usr/include -I $(NANOPB_DIR)/generator/proto -I . --python_out=python/ params.proto
+-	python $(NANOPB_DIR)/generator/nanopb_generator.py params.pb
+-	$(CC) -c $(CFLAGS) params.pb.c $(INCLUDES)
+-	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_encode.c $(INCLUDES)
+-	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_decode.c $(INCLUDES)
+-	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_common.c $(INCLUDES)
+-
+-state.pb : state.proto python/log_pb2.py
+-	protoc -I /usr/include -I $(NANOPB_DIR)/generator/proto -I . -o state.pb state.proto
+-	protoc -I /usr/include -I $(NANOPB_DIR)/generator/proto -I . --python_out=python/ state.proto
+-	python $(NANOPB_DIR)/generator/nanopb_generator.py state.pb
+-	$(CC) -c $(CFLAGS) state.pb.c $(INCLUDES)
+-	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_encode.c $(INCLUDES)
+-	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_decode.c $(INCLUDES)
+-	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_common.c $(INCLUDES)
+-
+-
+-clean : 
+-	rm -f *.o *.cof *.hex *.map *.lst *.d *.pb*
+-
++# MPLAB IDE generated this makefile for use with GNU make.
++# Project: photon 1_4.mcp
++# Date: Mon May 19 22:53:17 2014
++
++AS = xc16-as 
++CC = xc16-gcc
++LD = xc16-ld 
++AR = xc16-ar
++HX = xc16-bin2hex
++RM = rm
++CFLAGS = -mcpu=33FJ64GS606 -x c -g -Wall -merrata=psv_trap -O1 -mlarge-data -fgnu89-inline
++AFLAGS = -mcpu=33FJ64GS606 -Wa,-ahmcls=$*.lst
++LFLAGS = -o "fw.cof" -Wl,--script="../../dspic_include/p33FJ64GS606_main.gld",--defsym=__MPLAB_BUILD=1,--heap=512,-Map="fw.map",--report-mem
++OBJS := periph_compat.o photon_service.o adc.o can.o cobs.o debug.o fifo.o fpga.o general.o i2c.o leds.o main.o oscillator.o pwm.o queue.o timer.o tracker.o packet.o safety.o comparator.o fram.o params.pb.o pb_decode.o pb_common.o thermistor.o
++
++NANOPB_DIR = ../../nanopb
++VPATH = $(NANOPB_DIR)
++
++INC := $(NANOPB_DIR) ../../dspic_include
++INCLUDES := $(addprefix -I,$(INC))
++
++
++# from http://scottmcpeak.com/autodepend/autodepend.html
++
++# make hex
++fw.hex : fw.cof
++	$(HX) "fw.cof"
++
++# link
++fw.cof : $(OBJS)
++	$(CC) -mcpu=33FJ64GS606 $(OBJS) $(LFLAGS)
++ifneq ($(filter clean,$(MAKECMDGOALS)),clean)
++-include $(OBJS:.o=.d)
++endif
++
++# compile
++%.o : %.c state.pb.h params.pb.h
++	$(CC) -c $(CFLAGS) $< -o $*.o $(INCLUDES)
++	$(CC) -MM $(CFLAGS) $< $(INCLUDES) > $*.d
++
++# assemble
++%.o : %.s
++	$(CC) $(AFLAGS) -c $*.s -o $*.o 
++
++python/log_pb2.py : log.proto
++	protoc -I /usr/include -I $(NANOPB_DIR)/generator/proto -I . --python_out=python/ log.proto
++
++params.pb : params.proto
++	protoc -I /usr/include -I $(NANOPB_DIR)/generator/proto -I . -o params.pb params.proto
++	protoc -I /usr/include -I $(NANOPB_DIR)/generator/proto -I . --python_out=python/ params.proto
++	python $(NANOPB_DIR)/generator/nanopb_generator.py params.pb
++	$(CC) -c $(CFLAGS) params.pb.c $(INCLUDES)
++	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_encode.c $(INCLUDES)
++	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_decode.c $(INCLUDES)
++	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_common.c $(INCLUDES)
++
++state.pb : state.proto python/log_pb2.py
++	protoc -I /usr/include -I $(NANOPB_DIR)/generator/proto -I . -o state.pb state.proto
++	protoc -I /usr/include -I $(NANOPB_DIR)/generator/proto -I . --python_out=python/ state.proto
++	python $(NANOPB_DIR)/generator/nanopb_generator.py state.pb
++	$(CC) -c $(CFLAGS) state.pb.c $(INCLUDES)
++	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_encode.c $(INCLUDES)
++	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_decode.c $(INCLUDES)
++	$(CC) -c $(CFLAGS) $(NANOPB_DIR)/pb_common.c $(INCLUDES)
++
++
++clean : 
++	rm -f *.o *.cof *.hex *.map *.lst *.d *.pb*
++
+diff --git a/debug.c b/debug.c
+index 565cd2c..70e1335 100644
+--- a/debug.c
++++ b/debug.c
+@@ -1,146 +1,125 @@
+-/*******************************************************************************
+-   debug.c
+-   Copyright (c) 2015, Samuel Lenius
+-   All rights reserved.
+-
+-   Redistribution and use in source and binary forms, with or without
+-   modification, are permitted provided that the following conditions are met:
+-* Redistributions of source code must retain the above copyright
+-      notice, this list of conditions and the following disclaimer.
+-* Redistributions in binary form must reproduce the above copyright
+-      notice, this list of conditions and the following disclaimer in the
+-      documentation and/or other materials provided with the distribution.
+-* Neither the name of DILITHIUM POWER SYSTEMS LLC nor the
+-      names of its contributors may be used to endorse or promote products
+-      derived from this software without specific prior written permission.
+-
+-   THIS SOFTWARE IS PROVIDED BY DILITHIUM POWER SYSTEMS LLC ''AS IS'' AND ANY
+-   EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+-   WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-   DISCLAIMED. IN NO EVENT SHALL DILITHIUM POWER SYSTEMS LLC BE LIABLE FOR ANY
+-   DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+-   (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+-   LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+-   ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+-   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+-   THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-*******************************************************************************/
+-
+-#include "cobs.h"
+-#include "debug.h"
+-#include "fifo.h"
+-#include "general.h"
+-#include "leds.h"
+-#include "main.h"
+-#include "timer.h"
+-
+-#include "state.pb.h"
+-#include "params.pb.h"
+-
+-#include <math.h>
+-#include <pb_encode.h>
+-#include <stdio.h>
+-#include <string.h>
+-
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-// 921.6k -> 40e6 / (4 * 921600) - 1 = 9.85
+-#define BAUD_921k 10
+-  
+-// 2M -> 40e6 / (4 * 2e6) - 1 = 4 
+-#define BAUD_2M 4
+-//U1BRG = 4;
+-
+-// 921.6k -> 40e6 / (4 * 115200) - 1 = 85.80
+-#define BAUD_115k 86
+-
+-// 9600 -> 40e6 / (4 * 9600) - 1 = 1040.6
+-#define BAUD_9600 1041
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-extern uint8 ibuf[MAX(StateMessage_size, ParamsMessage_size)];
+-extern uint8 obuf[MAX(StateMessage_size, ParamsMessage_size)];
+-uint8 *obuf_ptr;
+-extern StateMessage state;
+-extern ParamsMessage params;
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void _ISR _U1TXInterrupt(void)
+-{
+-  char c;
+-  if(U1STAbits.UTXBF) return;
+-  IFS0bits.U1TXIF = 0;
+-  c = *obuf_ptr++;
+-  U1TXREG = c;
+-  if(c == 0x00) IEC0bits.U1TXIE = 0;
+-} 
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void _ISR _U1RXInterrupt(void)
+-{
+-  IFS0bits.U1RXIF = 0;
+-} 
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void InitDebug(void)
+-{
+-  uint16 brg;
+-
+-  switch(params.comm.debug_baudrate){
+-    case 2000000: brg = 4; break;
+-    case 921600: brg = 10; break;
+-    case 230400: brg = 43; break;
+-    case 115200: brg = 86; break;
+-    case 9600: brg = 1041; break;
+-    default: while(1){};
+-  }
+-
+-  U1BRG = brg;
+-  U1MODE = 0;
+-  U1STA = 0;
+-  U1MODEbits.BRGH = 1;
+-  U1MODEbits.UARTEN = 1;
+-  U1STAbits.UTXEN = 1;
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-
+-void SendStateMessage(void){
+-  bool status;
+-  pb_ostream_t stream;
+-
+-  // If the last message is still running - return
+-  if(IEC0bits.U1TXIE) return;
+-
+-  stream = pb_ostream_from_buffer(ibuf, StateMessage_size);
+-  status = pb_encode(&stream, StateMessage_fields, &state);
+-  memset(obuf, 0, StateMessage_size);
+-  CobsEncode(ibuf, stream.bytes_written, obuf);
+-  //state.dbg = stream.bytes_written;
+-  //state.dbg = sizeof(state);
+-
+-  // Start the serial port pushing data
+-  obuf_ptr = obuf;
+-  IEC0bits.U1TXIE = 1;
+-  IFS0bits.U1TXIF = 1;
+-
+-  state.sequence++;
+-  return;
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-
++/*******************************************************************************
++   debug.c
++   Copyright (c) 2015, Samuel Lenius
++   All rights reserved.
++
++   Redistribution and use in source and binary forms, with or without
++   modification, are permitted provided that the following conditions are met:
++* Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++* Redistributions in binary form must reproduce the above copyright
++      notice, this list of conditions and the following disclaimer in the
++      documentation and/or other materials provided with the distribution.
++* Neither the name of DILITHIUM POWER SYSTEMS LLC nor the
++      names of its contributors may be used to endorse or promote products
++      derived from this software without specific prior written permission.
++
++   THIS SOFTWARE IS PROVIDED BY DILITHIUM POWER SYSTEMS LLC ''AS IS'' AND ANY
++   EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++   WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++   DISCLAIMED. IN NO EVENT SHALL DILITHIUM POWER SYSTEMS LLC BE LIABLE FOR ANY
++   DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++   (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++   LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++   ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++   THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++*******************************************************************************/
++
++#include "cobs.h"
++#include "debug.h"
++#include "fifo.h"
++#include "general.h"
++#include "leds.h"
++#include "main.h"
++#include "timer.h"
++
++#include "state.pb.h"
++#include "params.pb.h"
++
++#include <math.h>
++#include <stdio.h>
++#include <string.h>
++
++
++/******************************************************************************/
++/******************************************************************************/
++
++// 921.6k -> 40e6 / (4 * 921600) - 1 = 9.85
++#define BAUD_921k 10
++  
++// 2M -> 40e6 / (4 * 2e6) - 1 = 4 
++#define BAUD_2M 4
++//U1BRG = 4;
++
++// 921.6k -> 40e6 / (4 * 115200) - 1 = 85.80
++#define BAUD_115k 86
++
++// 9600 -> 40e6 / (4 * 9600) - 1 = 1040.6
++#define BAUD_9600 1041
++
++/******************************************************************************/
++/******************************************************************************/
++
++extern uint8 ibuf[MAX(StateMessage_size, ParamsMessage_size)];
++extern uint8 obuf[MAX(StateMessage_size, ParamsMessage_size)];
++uint8 *obuf_ptr;
++extern StateMessage state;
++extern ParamsMessage params;
++
++/******************************************************************************/
++/******************************************************************************/
++
++void _ISR _U1TXInterrupt(void)
++{
++  char c;
++  if(U1STAbits.UTXBF) return;
++  IFS0bits.U1TXIF = 0;
++  c = *obuf_ptr++;
++  U1TXREG = c;
++  if(c == 0x00) IEC0bits.U1TXIE = 0;
++} 
++
++/******************************************************************************/
++/******************************************************************************/
++
++void _ISR _U1RXInterrupt(void)
++{
++  IFS0bits.U1RXIF = 0;
++} 
++
++/******************************************************************************/
++/******************************************************************************/
++
++void InitDebug(void)
++{
++  uint16 brg;
++
++  switch(params.comm.debug_baudrate){
++    case 2000000: brg = 4; break;
++    case 921600: brg = 10; break;
++    case 230400: brg = 43; break;
++    case 115200: brg = 86; break;
++    case 9600: brg = 1041; break;
++    default: while(1){};
++  }
++
++  U1BRG = brg;
++  U1MODE = 0;
++  U1STA = 0;
++  U1MODEbits.BRGH = 1;
++  U1MODEbits.UARTEN = 1;
++  U1STAbits.UTXEN = 1;
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++
++void SendStateMessage(void){
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++
+diff --git a/main.c b/main.c
+index 0a990d9..2f1209b 100644
+--- a/main.c
++++ b/main.c
+@@ -1,151 +1,153 @@
+-/*******************************************************************************
+-main.c
+-Copyright (c) 2015, Samuel Lenius
+-All rights reserved.
+-
+-Redistribution and use in source and binary forms, with or without
+-modification, are permitted provided that the following conditions are met:
+-    * Redistributions of source code must retain the above copyright
+-      notice, this list of conditions and the following disclaimer.
+-    * Redistributions in binary form must reproduce the above copyright
+-      notice, this list of conditions and the following disclaimer in the
+-      documentation and/or other materials provided with the distribution.
+-    * Neither the name of UMNSVP nor the
+-      names of its contributors may be used to endorse or promote products
+-      derived from this software without specific prior written permission.
+-
+-THIS SOFTWARE IS PROVIDED BY DILITHIUM POWER SYSTEMS LLC ''AS IS'' AND ANY
+-EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-DISCLAIMED. IN NO EVENT SHALL DILITHIUM POWER SYSTEMS LLC BE LIABLE FOR ANY
+-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-*******************************************************************************/
+-
+-#include "main.h"
+-#include "packet.h"
+-#include "timer.h"
+-#include "queue.h"
+-#include "adc.h"
+-#include "pwm.h"
+-#include "can.h"
+-#include "oscillator.h"
+-#include "leds.h"
+-#include "safety.h"
+-#include "tracker.h"
+-#include "state.pb.h"
+-#include "params.pb.h"
+-#include "debug.h"
+-#include "i2c.h"
+-
+-// Select Internal FRC at POR
+-_FOSCSEL(FNOSC_FRC & IESO_ON);
+-// Enable Clock Switching and Configure POSC in XT mode
+-_FOSC(FCKSM_CSECME & OSCIOFNC_OFF  & POSCMD_XT);  
+-
+-//Watchdog timer
+-_FWDT(FWDTEN_ON & WINDIS_OFF & WDTPRE_PR32 & WDTPOST_PS8192);  
+-//_FWDT(FWDTEN_OFF);
+-
+-//Power On Brown Out Reset Off
+-//Master CLR Enabled
+-//_FBORPOR(PBOR_OFF & MCLR_EN);
+-
+-//Power On Reset Delay
+-//128ms delay to initialization
+-_FPOR(FPWRT_PWR128);
+-
+-//ICD Setup
+-//Device will Reset in user mode
+-//Reset in operational mode
+-//JTAG is disabled
+-//communicate on PGC2/EMUC2 and PGD2/EMUD2
+-_FICD(JTAGEN_OFF & ICS_PGD2);
+-
+-//_FGS(GCP_OFF & GSS_OFF & GWRP_OFF); 
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-//Global Declarations
+-
+-volatile StateMessage state;
+-volatile ParamsMessage params;
+-volatile int therm_t[1023];
+-volatile bool run_control_voltages = false;
+-volatile bool run_control_voltage_fsm = false;
+-volatile bool send_state_message = false;
+-
+-uint8 ibuf[MAX(StateMessage_size, ParamsMessage_size)];
+-uint8 obuf[MAX(StateMessage_size, ParamsMessage_size)];
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-int main(void){
+-  Initialize();
+-  while(1){
+-    disableInterrupts();
+-    if(QueueEmpty() == 0){}
+-    else{	
+-      enableInterrupts();
+-      Idle(); 
+-    }
+-    ClrWdt();
+-    enableInterrupts();
+-    QueuePump();
+-  }
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-int16 msg_per_counter = 0;
+-
+-void SendMessages(int16 period){
+-  if(msg_per_counter++ >= period){
+-    if(params.comm.debug_mode){
+-      SendStateMessageCAN();
+-    }else{
+-      SendMeasurementPacket(0);
+-      SendMeasurementPacket(1);
+-    }
+-    msg_per_counter = 0;
+-  }
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-int16 led_counter = 0;
+-
+-void RunTracker(void){
+-  int16 msg_divisor = 50;
+-  int16 min_msg_divisor = 50;
+-  if(led_counter++ >= 10){
+-    LED_G_TOG();
+-    led_counter = 0;
+-  }
+-  TrackerStateMachine();
+-
+-  switch(params.comm.can_bitrate){
+-    case 10000:   min_msg_divisor = 49; break;
+-    case 20000:   min_msg_divisor = 39; break;
+-    case 50000:   min_msg_divisor = 9; break;
+-    case 100000:  min_msg_divisor = 4; break;
+-    case 125000:  min_msg_divisor = 3; break;
+-    case 250000:  min_msg_divisor = 1; break;
+-    case 500000:  min_msg_divisor = 0; break;
+-    case 1000000: min_msg_divisor = 0; break;
+-    default:      min_msg_divisor = 49; break;
+-  }
+-  msg_divisor = MAX(min_msg_divisor, params.comm.msg_divisor);
+-
+-  SendMessages(msg_divisor);
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
++/*******************************************************************************
++main.c
++Copyright (c) 2015, Samuel Lenius
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are met:
++    * Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++    * Redistributions in binary form must reproduce the above copyright
++      notice, this list of conditions and the following disclaimer in the
++      documentation and/or other materials provided with the distribution.
++    * Neither the name of UMNSVP nor the
++      names of its contributors may be used to endorse or promote products
++      derived from this software without specific prior written permission.
++
++THIS SOFTWARE IS PROVIDED BY DILITHIUM POWER SYSTEMS LLC ''AS IS'' AND ANY
++EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED. IN NO EVENT SHALL DILITHIUM POWER SYSTEMS LLC BE LIABLE FOR ANY
++DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++*******************************************************************************/
++
++#include "main.h"
++#include "packet.h"
++#include "timer.h"
++#include "queue.h"
++#include "adc.h"
++#include "pwm.h"
++#include "can.h"
++#include "oscillator.h"
++#include "leds.h"
++#include "safety.h"
++#include "tracker.h"
++#include "state.pb.h"
++#include "params.pb.h"
++#include "debug.h"
++#include "i2c.h"
++#include "photon_service.h"
++
++// Select Internal FRC at POR
++_FOSCSEL(FNOSC_FRC & IESO_ON);
++// Enable Clock Switching and Configure POSC in XT mode
++_FOSC(FCKSM_CSECME & OSCIOFNC_OFF  & POSCMD_XT);  
++
++//Watchdog timer
++_FWDT(FWDTEN_ON & WINDIS_OFF & WDTPRE_PR32 & WDTPOST_PS8192);  
++//_FWDT(FWDTEN_OFF);
++
++//Power On Brown Out Reset Off
++//Master CLR Enabled
++//_FBORPOR(PBOR_OFF & MCLR_EN);
++
++//Power On Reset Delay
++//128ms delay to initialization
++_FPOR(FPWRT_PWR128);
++
++//ICD Setup
++//Device will Reset in user mode
++//Reset in operational mode
++//JTAG is disabled
++//communicate on PGC2/EMUC2 and PGD2/EMUD2
++_FICD(JTAGEN_OFF & ICS_PGD2);
++
++//_FGS(GCP_OFF & GSS_OFF & GWRP_OFF); 
++
++/******************************************************************************/
++/******************************************************************************/
++//Global Declarations
++
++volatile StateMessage state;
++volatile ParamsMessage params;
++volatile int therm_t[1023];
++volatile bool run_control_voltages = false;
++volatile bool run_control_voltage_fsm = false;
++volatile bool send_state_message = false;
++
++uint8 ibuf[MAX(StateMessage_size, ParamsMessage_size)];
++uint8 obuf[MAX(StateMessage_size, ParamsMessage_size)];
++
++/******************************************************************************/
++/******************************************************************************/
++
++int main(void){
++  Initialize();
++  while(1){
++    disableInterrupts();
++    if(QueueEmpty() == 0){}
++    else{	
++      enableInterrupts();
++      Idle(); 
++    }
++    ClrWdt();
++    enableInterrupts();
++    QueuePump();
++  }
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++int16 msg_per_counter = 0;
++
++void SendMessages(int16 period){
++  if(msg_per_counter++ >= period){
++    if(params.comm.debug_mode){
++      SendStateMessageCAN();
++    }else{
++      SendMeasurementPacket(0);
++      SendMeasurementPacket(1);
++    }
++    msg_per_counter = 0;
++  }
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++int16 led_counter = 0;
++
++void RunTracker(void){
++  int16 msg_divisor = 50;
++  int16 min_msg_divisor = 50;
++  if(led_counter++ >= 10){
++    LED_G_TOG();
++    led_counter = 0;
++  }
++  TrackerStateMachine();
++
++  switch(params.comm.can_bitrate){
++    case 10000:   min_msg_divisor = 49; break;
++    case 20000:   min_msg_divisor = 39; break;
++    case 50000:   min_msg_divisor = 9; break;
++    case 100000:  min_msg_divisor = 4; break;
++    case 125000:  min_msg_divisor = 3; break;
++    case 250000:  min_msg_divisor = 1; break;
++    case 500000:  min_msg_divisor = 0; break;
++    case 1000000: min_msg_divisor = 0; break;
++    default:      min_msg_divisor = 49; break;
++  }
++  msg_divisor = MAX(min_msg_divisor, params.comm.msg_divisor);
++
++  SendMessages(msg_divisor);
++  PhotonStream();
++}
++
++/******************************************************************************/
++/******************************************************************************/
+diff --git a/packet.c b/packet.c
+index 9f84d87..a15a176 100644
+--- a/packet.c
++++ b/packet.c
+@@ -1,225 +1,187 @@
+-/*******************************************************************************
+-packet.c
+-Copyright (c) 2015, Samuel Lenius
+-All rights reserved.
+-
+-Redistribution and use in source and binary forms, with or without
+-modification, are permitted provided that the following conditions are met:
+-    * Redistributions of source code must retain the above copyright
+-      notice, this list of conditions and the following disclaimer.
+-    * Redistributions in binary form must reproduce the above copyright
+-      notice, this list of conditions and the following disclaimer in the
+-      documentation and/or other materials provided with the distribution.
+-    * Neither the name of UMNSVP nor the
+-      names of its contributors may be used to endorse or promote products
+-      derived from this software without specific prior written permission.
+-
+-THIS SOFTWARE IS PROVIDED BY DILITHIUM POWER SYSTEMS LLC ''AS IS'' AND ANY
+-EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-DISCLAIMED. IN NO EVENT SHALL DILITHIUM POWER SYSTEMS LLC BE LIABLE FOR ANY
+-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-*******************************************************************************/
+-
+-#include "packet.h"
+-#include "can.h"
+-#include "leds.h"
+-#include "main.h"
+-#include "adc.h"
+-#include "params.pb.h"
+-#include "state.pb.h"
+-#include "cobs.h"
+-#include <pb.h>
+-#include <pb_common.h>
+-#include <pb_encode.h>
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-static uint8 ibuf[StateMessage_size];
+-static uint8 obuf[StateMessage_size];
+-static uint8 *obuf_ptr = obuf;
+-static uint16 pkt_nbr; 
+-static uint8 not_done = False;
+-
+-extern StateMessage state;
+-extern ParamsMessage params;
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void SendStateMessageCAN(void){
+-  bool status;
+-  pb_ostream_t stream;
+-
+-  if(not_done == false){
+-    memset(ibuf, 0, StateMessage_size);
+-    memset(obuf, 0, StateMessage_size);
+-
+-    stream = pb_ostream_from_buffer(ibuf, StateMessage_size);
+-    status = pb_encode(&stream, StateMessage_fields, &state);
+-  
+-    CobsEncode(ibuf, stream.bytes_written, obuf);
+-    //state.dbg = stream.bytes_written;
+-    //state.dbg = sizeof(state);
+-
+-    // Start pushing data
+-    obuf_ptr = obuf;
+-    pkt_nbr = 0;
+-    state.sequence++;
+-    not_done = True;
+-  }
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void SendBurstMessageData(void){
+-  uint8 pkt[8] = {0,0,0,0,0,0,0,0};     
+-  uint8 c;
+-  uint8 i;
+-  c = *obuf_ptr;
+-  
+-  union u_t u;
+-        
+-  u.lu = 0;
+-  if(state.burst_pkts_ch == 0){
+-    u.su.lu = ADCBUF0;
+-  }else{
+-    u.su.lu = ADCBUF2;
+-  }
+-
+-  pkt[0] = u.cu[0];
+-  pkt[1] = u.cu[1];
+-
+-  u.lu = 0;
+-  if(state.burst_pkts_ch == 0){
+-    u.su.lu = ADCBUF1;
+-  }else{
+-    u.su.lu = ADCBUF3;
+-  }
+-  pkt[2] = u.cu[0];
+-  pkt[3] = u.cu[1];
+-
+-  u.lu = 0;
+-  u.su.lu = state.chan[state.burst_pkts_ch].v_raw;
+-  pkt[4] = u.cu[0];
+-  pkt[5] = u.cu[1];
+-
+-  u.lu = 0;
+-  u.su.lu = state.chan[state.burst_pkts_ch].i_raw;
+-  pkt[6] = u.cu[0];
+-  pkt[7] = u.cu[1];
+-
+-
+-  sendCANMsg(state.n_burst_pkts, pkt, 8);
+-  
+-  if(state.n_burst_pkts > 0){
+-    state.n_burst_pkts--;
+-  }
+-}
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void SendStateMessageData(void){
+-  uint8 pkt[8] = {0,0,0,0,0,0,0,0};     
+-  uint8 c;
+-  uint8 i;
+-  c = *obuf_ptr;
+-
+-  if(not_done == true){
+-    for(i=0; i<8; i++){
+-      if(not_done){
+-        c = *obuf_ptr++;
+-        if(c == 0){
+-          not_done = false;
+-        }
+-        pkt[i] = c;
+-      }else{
+-        pkt[i] = 0;
+-      }
+-    }
+-    sendCANMsg(pkt_nbr++, pkt, 8);
+-  }
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-static float v_scale = 100;
+-static float i_scale = 1000;
+-
+-void SendMeasurementPacket(int channel){
+-  uint8 data[8] = {0,0,0,0,0,0,0,0};      
+-  int32 vin = state.chan[channel].v * v_scale;
+-  int32 vout = state.batt_v * v_scale;
+-  int32 current = state.chan[channel].i * i_scale;
+-  union u_t u;
+-
+-  
+-  u.lu = 0;
+-  u.su.lu = vin;
+-  data[0] = u.cu[0];
+-  data[1] = u.cu[1];
+-  
+-  u.lu = 0;
+-  u.su.lu = current;
+-  data[2] = u.cu[0];
+-  data[3] = u.cu[1];
+-  
+-  u.lu = 0;
+-  u.su.lu = vout;
+-  data[4] = u.cu[0];
+-  data[5] = u.cu[1];
+-                  
+-  u.lu = 0;
+-  u.ss.ls = state.chan[channel].temp;
+-  data[6] = u.cu[0];
+-  data[7] = u.cu[1];
+-  
+-  sendCANMsg(params.comm.can_base_addr+channel, data, 8); 
+-       
+-}       
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void sendDebugPacket(void){
+-  uint8 data[8] = {0,0,0,0,0,0,0,0};      
+-  uint16 vin = 0;
+-  uint16 iin = 0;
+-  uint16 vout = 0;
+-  uint16 iout = 0;
+-  
+-  union u_t u;
+-  
+-  u.lu = 0;
+-  u.su.lu = vin;
+-  data[0] = u.cu[0];
+-  data[1] = u.cu[1];
+-  
+-  u.lu = 0;
+-  u.su.lu = iin;
+-  data[2] = u.cu[0];
+-  data[3] = u.cu[1];
+-
+-  u.lu = 0;
+-  u.su.lu = vout;
+-  data[4] = u.cu[0];
+-  data[5] = u.cu[1];
+-  
+-  u.lu = 0;
+-  u.su.lu = iout;
+-  data[6] = u.cu[0];
+-  data[7] = u.cu[1];
+-  
+-  sendCANMsg(0x73, data, 8);      
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/        
++/*******************************************************************************
++packet.c
++Copyright (c) 2015, Samuel Lenius
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are met:
++    * Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++    * Redistributions in binary form must reproduce the above copyright
++      notice, this list of conditions and the following disclaimer in the
++      documentation and/or other materials provided with the distribution.
++    * Neither the name of UMNSVP nor the
++      names of its contributors may be used to endorse or promote products
++      derived from this software without specific prior written permission.
++
++THIS SOFTWARE IS PROVIDED BY DILITHIUM POWER SYSTEMS LLC ''AS IS'' AND ANY
++EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED. IN NO EVENT SHALL DILITHIUM POWER SYSTEMS LLC BE LIABLE FOR ANY
++DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++*******************************************************************************/
++
++#include "packet.h"
++#include "can.h"
++#include "leds.h"
++#include "main.h"
++#include "adc.h"
++#include "params.pb.h"
++#include "state.pb.h"
++#include "cobs.h"
++#include <pb.h>
++#include <pb_common.h>
++
++/******************************************************************************/
++/******************************************************************************/
++
++static uint8 ibuf[StateMessage_size];
++static uint8 obuf[StateMessage_size];
++static uint8 *obuf_ptr = obuf;
++static uint16 pkt_nbr; 
++static uint8 not_done = False;
++
++extern StateMessage state;
++extern ParamsMessage params;
++
++/******************************************************************************/
++/******************************************************************************/
++
++// The protobuf state stream (debug_mode) is not built: it needs pb_encode,
++// which no longer fits in program memory. Use the photon_service registers.
++void SendStateMessageCAN(void){
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++void SendBurstMessageData(void){
++  uint8 pkt[8] = {0,0,0,0,0,0,0,0};     
++  uint8 c;
++  uint8 i;
++  c = *obuf_ptr;
++  
++  union u_t u;
++        
++  u.lu = 0;
++  if(state.burst_pkts_ch == 0){
++    u.su.lu = ADCBUF0;
++  }else{
++    u.su.lu = ADCBUF2;
++  }
++
++  pkt[0] = u.cu[0];
++  pkt[1] = u.cu[1];
++
++  u.lu = 0;
++  if(state.burst_pkts_ch == 0){
++    u.su.lu = ADCBUF1;
++  }else{
++    u.su.lu = ADCBUF3;
++  }
++  pkt[2] = u.cu[0];
++  pkt[3] = u.cu[1];
++
++  u.lu = 0;
++  u.su.lu = state.chan[state.burst_pkts_ch].v_raw;
++  pkt[4] = u.cu[0];
++  pkt[5] = u.cu[1];
++
++  u.lu = 0;
++  u.su.lu = state.chan[state.burst_pkts_ch].i_raw;
++  pkt[6] = u.cu[0];
++  pkt[7] = u.cu[1];
++
++
++  sendCANMsg(state.n_burst_pkts, pkt, 8);
++  
++  if(state.n_burst_pkts > 0){
++    state.n_burst_pkts--;
++  }
++}
++/******************************************************************************/
++/******************************************************************************/
++
++void SendStateMessageData(void){
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++static float v_scale = 100;
++static float i_scale = 1000;
++
++void SendMeasurementPacket(int channel){
++  uint8 data[8] = {0,0,0,0,0,0,0,0};      
++  int32 vin = state.chan[channel].v * v_scale;
++  int32 vout = state.batt_v * v_scale;
++  int32 current = state.chan[channel].i * i_scale;
++  union u_t u;
++
++  
++  u.lu = 0;
++  u.su.lu = vin;
++  data[0] = u.cu[0];
++  data[1] = u.cu[1];
++  
++  u.lu = 0;
++  u.su.lu = current;
++  data[2] = u.cu[0];
++  data[3] = u.cu[1];
++  
++  u.lu = 0;
++  u.su.lu = vout;
++  data[4] = u.cu[0];
++  data[5] = u.cu[1];
++                  
++  u.lu = 0;
++  u.ss.ls = state.chan[channel].temp;
++  data[6] = u.cu[0];
++  data[7] = u.cu[1];
++  
++  sendCANMsg(params.comm.can_base_addr+channel, data, 8); 
++       
++}       
++
++/******************************************************************************/
++/******************************************************************************/
++
++void sendDebugPacket(void){
++  uint8 data[8] = {0,0,0,0,0,0,0,0};      
++  uint16 vin = 0;
++  uint16 iin = 0;
++  uint16 vout = 0;
++  uint16 iout = 0;
++  
++  union u_t u;
++  
++  u.lu = 0;
++  u.su.lu = vin;
++  data[0] = u.cu[0];
++  data[1] = u.cu[1];
++  
++  u.lu = 0;
++  u.su.lu = iin;
++  data[2] = u.cu[0];
++  data[3] = u.cu[1];
++
++  u.lu = 0;
++  u.su.lu = vout;
++  data[4] = u.cu[0];
++  data[5] = u.cu[1];
++  
++  u.lu = 0;
++  u.su.lu = iout;
++  data[6] = u.cu[0];
++  data[7] = u.cu[1];
++  
++  sendCANMsg(0x73, data, 8);      
++}
++
++/******************************************************************************/
++/******************************************************************************/        
+diff --git a/periph_compat.c b/periph_compat.c
+new file mode 100644
+index 0000000..9cfc711
+--- /dev/null
++++ b/periph_compat.c
+@@ -0,0 +1,107 @@
++/*******************************************************************************
++periph_compat.c
++Replacements for the legacy Microchip dsPIC peripheral library calls used by
++this firmware. The bundled libp33FJ64GS606-coff.a is COFF and XC16 2.x links
++ELF only. Each function mirrors the documented behaviour of the original
++library routine.
++*******************************************************************************/
++
++#include "general.h"
++
++/******************************************************************************/
++/* SPI */
++
++void OpenSPI1(unsigned int config1, unsigned int config2, unsigned int config3){
++  SPI1CON1 = config1;
++  SPI1CON2 = config2;
++  SPI1STAT = config3;
++}
++
++void OpenSPI2(unsigned int config1, unsigned int config2, unsigned int config3){
++  SPI2CON1 = config1;
++  SPI2CON2 = config2;
++  SPI2STAT = config3;
++}
++
++// config bit 3 = interrupt enable, bits 0-2 = priority
++void ConfigIntSPI1(unsigned int config){
++  IFS0bits.SPI1IF = 0;
++  IPC2bits.SPI1IP = config & 0x0007;
++  IEC0bits.SPI1IE = (config & 0x0008) >> 3;
++}
++
++void ConfigIntSPI2(unsigned int config){
++  IFS2bits.SPI2IF = 0;
++  IPC8bits.SPI2IP = config & 0x0007;
++  IEC2bits.SPI2IE = (config & 0x0008) >> 3;
++}
++
++char DataRdySPI1(void){ return SPI1STATbits.SPIRBF; }
++char DataRdySPI2(void){ return SPI2STATbits.SPIRBF; }
++
++unsigned int ReadSPI1(void){
++  if(SPI1CON1bits.MODE16) return SPI1BUF;
++  return SPI1BUF & 0xff;
++}
++
++unsigned int ReadSPI2(void){
++  if(SPI2CON1bits.MODE16) return SPI2BUF;
++  return SPI2BUF & 0xff;
++}
++
++void WriteSPI1(unsigned int data_out){
++  if(SPI1CON1bits.MODE16) SPI1BUF = data_out;
++  else SPI1BUF = data_out & 0xff;
++}
++
++void WriteSPI2(unsigned int data_out){
++  if(SPI2CON1bits.MODE16) SPI2BUF = data_out;
++  else SPI2BUF = data_out & 0xff;
++}
++
++/******************************************************************************/
++/* I2C1 */
++
++void IdleI2C1(void){
++  while(I2C1CONbits.SEN || I2C1CONbits.PEN || I2C1CONbits.RCEN ||
++        I2C1CONbits.RSEN || I2C1CONbits.ACKEN || I2C1STATbits.TRSTAT);
++}
++
++void StartI2C1(void){ I2C1CONbits.SEN = 1; }
++void StopI2C1(void){ I2C1CONbits.PEN = 1; }
++
++char MasterWriteI2C1(unsigned char data_out){
++  I2C1TRN = data_out;
++  if(I2C1STATbits.IWCOL) return -1;
++  return 0;
++}
++
++unsigned char MasterReadI2C1(void){
++  I2C1CONbits.RCEN = 1;
++  while(I2C1CONbits.RCEN);
++  I2C1STATbits.I2COV = 0;
++  return I2C1RCV;
++}
++
++/******************************************************************************/
++/* SMPS PWM and analog comparators (used only on hardware before rev 3.2) */
++
++void CloseSmpsPWM(void){
++  PTCONbits.PTEN = 0;
++}
++
++void ConfigIntSmpsCMP1(unsigned int cmp_intp, unsigned int pri){
++  IFS1bits.AC1IF = 0; IPC4bits.AC1IP = pri & 7; IEC1bits.AC1IE = cmp_intp & 1;
++}
++
++void ConfigIntSmpsCMP2(unsigned int cmp_intp, unsigned int pri){
++  IFS6bits.AC2IF = 0; IPC25bits.AC2IP = pri & 7; IEC6bits.AC2IE = cmp_intp & 1;
++}
++
++void ConfigIntSmpsCMP3(unsigned int cmp_intp, unsigned int pri){
++  IFS6bits.AC3IF = 0; IPC26bits.AC3IP = pri & 7; IEC6bits.AC3IE = cmp_intp & 1;
++}
++
++void ConfigIntSmpsCMP4(unsigned int cmp_intp, unsigned int pri){
++  IFS6bits.AC4IF = 0; IPC26bits.AC4IP = pri & 7; IEC6bits.AC4IE = cmp_intp & 1;
++}
+diff --git a/photon_fields.inc b/photon_fields.inc
+index d925ed9..4b61804 100644
+--- a/photon_fields.inc
++++ b/photon_fields.inc
+@@ -1,123 +1,26 @@
+-/* Shared register schema: IDs are protocol ABI. I = signed int32, F = float32. */
+-STATE(1, I, sequence)
+-STATE(2, I, batt_v_raw)
+-STATE(3, I, batt_i_raw)
+-STATE(4, I, temp_ambient)
+-STATE(5, I, safety)
+-STATE(6, I, control)
+-STATE(7, I, precharge)
+-STATE(8, I, main)
+-STATE(9, I, loops)
+-STATE(10, I, precharge_loops)
+-STATE(11, I, precharge_adc)
+-STATE(12, I, batt_p_raw)
+-STATE(13, I, batt_p_last_raw)
+-STATE(14, I, dbg)
+-STATE(15, I, t_raw)
+-STATE(17, I, alg)
+-STATE(18, I, max_dac)
+-STATE(19, F, batt_v)
+-STATE(20, F, batt_i)
+-STATE(21, I, fpga_fault)
+-STATE(22, I, n_burst_pkts)
+-STATE(23, I, burst_pkts_ch)
+-STATE(101, I, chan[0].v_raw)
+-STATE(102, I, chan[0].v_raw_last_change)
+-STATE(103, I, chan[0].v_goal_raw)
+-STATE(104, I, chan[0].v_error_raw)
+-STATE(105, I, chan[0].p_term)
+-STATE(106, I, chan[0].i_term)
+-STATE(107, I, chan[0].i_raw)
+-STATE(108, I, chan[0].p_raw)
+-STATE(109, I, chan[0].p_last_raw)
+-STATE(110, I, chan[0].temp)
+-STATE(111, I, chan[0].dac)
+-STATE(112, I, chan[0].dir)
+-STATE(113, I, chan[0].dbg)
+-STATE(114, I, chan[0].period)
+-STATE(115, I, chan[0].t_raw)
+-STATE(116, F, chan[0].v_last)
+-STATE(117, F, chan[0].i_last)
+-STATE(118, F, chan[0].v_delta)
+-STATE(119, F, chan[0].i_delta)
+-STATE(120, F, chan[0].iv)
+-STATE(121, F, chan[0].didv)
+-STATE(122, I, chan[0].p_raw_sweep_mpp)
+-STATE(123, I, chan[0].v_raw_sweep_mpp)
+-STATE(124, I, chan[0].v_raw_sweep_done)
+-STATE(125, I, chan[0].sweep_done)
+-STATE(126, I, chan[0].v_raw_voc)
+-STATE(127, I, chan[0].voc_raw)
+-STATE(128, I, chan[0].vsc_raw)
+-STATE(129, F, chan[0].v)
+-STATE(130, F, chan[0].i)
+-STATE(131, I, chan[0].p_last_change_raw)
+-STATE(201, I, chan[1].v_raw)
+-STATE(202, I, chan[1].v_raw_last_change)
+-STATE(203, I, chan[1].v_goal_raw)
+-STATE(204, I, chan[1].v_error_raw)
+-STATE(205, I, chan[1].p_term)
+-STATE(206, I, chan[1].i_term)
+-STATE(207, I, chan[1].i_raw)
+-STATE(208, I, chan[1].p_raw)
+-STATE(209, I, chan[1].p_last_raw)
+-STATE(210, I, chan[1].temp)
+-STATE(211, I, chan[1].dac)
+-STATE(212, I, chan[1].dir)
+-STATE(213, I, chan[1].dbg)
+-STATE(214, I, chan[1].period)
+-STATE(215, I, chan[1].t_raw)
+-STATE(216, F, chan[1].v_last)
+-STATE(217, F, chan[1].i_last)
+-STATE(218, F, chan[1].v_delta)
+-STATE(219, F, chan[1].i_delta)
+-STATE(220, F, chan[1].iv)
+-STATE(221, F, chan[1].didv)
+-STATE(222, I, chan[1].p_raw_sweep_mpp)
+-STATE(223, I, chan[1].v_raw_sweep_mpp)
+-STATE(224, I, chan[1].v_raw_sweep_done)
+-STATE(225, I, chan[1].sweep_done)
+-STATE(226, I, chan[1].v_raw_voc)
+-STATE(227, I, chan[1].voc_raw)
+-STATE(228, I, chan[1].vsc_raw)
+-STATE(229, F, chan[1].v)
+-STATE(230, F, chan[1].i)
+-STATE(231, I, chan[1].p_last_change_raw)
+-/* PARAM(id, encoding, member, min, max); equal bounds mean read-only. */
+-PARAM(1000, I, device.serial_number, 0, 0)
+-PARAM(1001, I, device.hw_rev, 0, 0)
+-PARAM(1002, F, device.v_scale, 0.000001, 1)
+-PARAM(1003, F, device.i_scale, 0.000001, 1)
+-PARAM(1004, F, device.v_cv_charge, 1, 150)
+-PARAM(1005, F, device.v_cv_charge_hyst, 0.01, 20)
+-PARAM(1010, F, chan[0].v_scale, 0.000001, 1)
+-PARAM(1011, F, chan[0].i_scale, 0.000001, 1)
+-PARAM(1012, F, chan[1].v_scale, 0.000001, 1)
+-PARAM(1013, F, chan[1].i_scale, 0.000001, 1)
+-PARAM(1020, I, comm.can_bitrate, 0, 0)
+-PARAM(1021, I, comm.can_base_addr, 0, 0)
+-PARAM(1022, I, comm.msg_divisor, 0, 1000)
+-PARAM(1030, I, track.po_step_size, 1, 256)
+-PARAM(1031, I, track.min_retrack_time, 1, 90000)
+-PARAM(1032, F, track.voltage_hyst, 0.01, 10)
+-PARAM(1040, F, thermistor.beta, 0, 0)
+-PARAM(1041, F, thermistor.t_o, 0, 0)
+-PARAM(1042, F, thermistor.r_o, 0, 0)
+-PARAM(1043, F, thermistor.r_bias, 0, 0)
+-PARAM(1050, I, code.crc32, 0, 0)
+-PARAM(1051, I, code.bitstream_crc32, 0, 0)
+-/* TUNE(id, member, default, min, max). Time units are 20 ms tracker ticks. */
+-TUNE(1100, algorithm, 1, 1, 2)
+-TUNE(1101, algorithm_ticks, 4, 1, 1000)
+-TUNE(1102, retrack_ticks, 16536, 50, 180000)
++/* Tracker tuning registers: TUNE(id, member, default, min, max).
++ * IDs are protocol ABI. All values are int32. Time units are 20 ms tracker
++ * ticks; voltages are channel ADC counts (multiply by chan v_scale for volts).
++ * Every TUNE register can be written while tracking. */
++TUNE(1100, algorithm, 1, 1, 2)              /* 1 = power P&O, 2 = incremental conductance */
++TUNE(1101, algorithm_ticks, 4, 1, 1000)     /* sweep / IC cadence */
++TUNE(1102, retrack_ticks, 15000, 50, 180000)/* periodic Voc + sweep (5 min) */
+ TUNE(1103, sweep_timeout_ticks, 250, 1, 3000)
+ TUNE(1104, voc_ticks, 1, 1, 1000)
+ TUNE(1105, sweep_dac_step, 64, 1, 256)
+ TUNE(1106, inc_step, 24, 1, 256)
+-TUNE(1107, p_divisor, 4, 1, 1024)
+-TUNE(1108, i_divisor, 16, 1, 4096)
++TUNE(1107, p_divisor, 4, 1, 1024)           /* voltage PI: P = err / p_divisor */
++TUNE(1108, i_divisor, 16, 1, 4096)          /* voltage PI: I += err / i_divisor per 5 ms, remainder kept */
+ TUNE(1109, min_voltage_raw, 96, 96, 5911)
+ TUNE(1110, max_voltage_raw, 5912, 97, 5912)
+ TUNE(1111, max_pid_error, 248, 1, 1024)
+ TUNE(1112, sweep_floor_percent, 50, 10, 95)
+ TUNE(1113, power_drop_percent, 50, 1, 99)
++TUNE(1114, po_period_ticks, 5, 2, 100)      /* P&O: one perturbation per period */
++TUNE(1115, po_settle_ticks, 2, 0, 99)       /* P&O: ticks ignored after each step before averaging */
++TUNE(1116, po_step_min, 12, 1, 500)         /* P&O: step after a reversal (~0.25 V) */
++TUNE(1117, po_step_max, 200, 1, 1000)       /* P&O: step after repeated same-direction gains (~4 V) */
++TUNE(1118, po_up_clamp, 24, 1, 1000)        /* P&O: goal may not exceed measured V by more than this */
++TUNE(1119, po_down_clamp, 100, 1, 2000)     /* P&O: goal may not fall below measured V by more than this */
++TUNE(1120, hold_v_raw, 0, 0, 5912)          /* 0 = track; otherwise hold this input voltage */
++TUNE(1121, stream, 0, 0, 1)                 /* 1 = send tracker debug frames on base+0xE1/0xE2 at 50 Hz */
+diff --git a/photon_service.c b/photon_service.c
+index 97b57f1..14113cf 100644
+--- a/photon_service.c
++++ b/photon_service.c
+@@ -1,4 +1,14 @@
+-/* Application-only diagnostics. No flash or bootloader commands. */
++/* Application-only CAN diagnostics and tuning. No flash, FRAM or bootloader
++ * commands.
++ *
++ * Requests on base+0xD0, replies on base+0xE0, all 8 bytes:
++ *   [0] op  [1] sequence  [2..3] field id (LE)  [4..7] value (LE int32/float32)
++ * Ops: 0 identify, 1 read, 2 write, 3 stop, 4 start, 5 retrack.
++ * Replies echo the request with op | 0x80; errors reply op 0xFF with the error
++ * code in the value: 1 unknown field/op, 2 state does not allow it,
++ * 3 read-only or out of range, 4 active fault.
++ * TUNE registers can be written while tracking. PARAM writes require stop.
++ */
+ #include "photon_service.h"
+ #include "main.h"
+ #include "pwm.h"
+@@ -6,102 +16,171 @@
+ #include "tracker.h"
+ #include "params.pb.h"
+ #include "state.pb.h"
+-#include <math.h>
+ #include <string.h>
+ 
+ extern volatile StateMessage state;
+ extern volatile ParamsMessage params;
+ volatile bool photon_disabled = false;
++
+ PhotonTuning photon_tuning = {
+-#define STATE(id, type, member)
+-#define PARAM(id, type, member, lo, hi)
+ #define TUNE(id, member, def, lo, hi) def,
+ #include "photon_fields.inc"
+-#undef STATE
+-#undef PARAM
+ #undef TUNE
+ };
+-/* ponytail: one snapshot/client per device; add session IDs for concurrent tools. */
+-static StateMessage snapshot;
++
++typedef struct { int32 lo, hi; } Range;
++static const Range tune_range[] = {
++#define TUNE(id, member, def, lo, hi) {lo, hi},
++#include "photon_fields.inc"
++#undef TUNE
++};
++#define TUNE_FIRST 1100
++#define TUNE_COUNT (sizeof(tune_range) / sizeof(tune_range[0]))
++
++/* Field types: storage size and encoding. */
++enum { T_I32, T_F32, T_I16, T_U8 };
++/* Flags: writable while stopped (PARAM) */
++#define F_RO 0
++#define F_RW 1
++
++typedef struct {
++  uint16 id;
++  uint8 type;
++  uint8 flags;
++  volatile void *ptr;
++  float lo, hi;
++} Field;
++
++#define CH(c, base) \
++  {base + 1,  T_I32, F_RO, &state.chan[c].v_raw, 0, 0}, \
++  {base + 3,  T_I32, F_RO, &state.chan[c].v_goal_raw, 0, 0}, \
++  {base + 6,  T_I32, F_RO, &state.chan[c].i_term, 0, 0}, \
++  {base + 7,  T_I32, F_RO, &state.chan[c].i_raw, 0, 0}, \
++  {base + 10, T_I32, F_RO, &state.chan[c].temp, 0, 0}, \
++  {base + 11, T_I32, F_RO, &state.chan[c].dac, 0, 0}, \
++  {base + 12, T_I16, F_RO, &state.chan[c].dir, 0, 0}, \
++  {base + 22, T_I32, F_RO, &state.chan[c].p_raw_sweep_mpp, 0, 0}, \
++  {base + 23, T_I32, F_RO, &state.chan[c].v_raw_sweep_mpp, 0, 0}, \
++  {base + 25, T_U8,  F_RO, &state.chan[c].sweep_done, 0, 0}, \
++  {base + 27, T_I32, F_RO, &state.chan[c].voc_raw, 0, 0}, \
++  {base + 28, T_I32, F_RO, &state.chan[c].vsc_raw, 0, 0}, \
++  {base + 40, T_I32, F_RO, &po_step[c], 0, 0}, \
++  {base + 41, T_I32, F_RO, &po_p_prev[c], 0, 0}, \
++  {base + 42, T_I32, F_RO, &po_v_avg[c], 0, 0}, \
++  {base + 43, T_I32, F_RO, &po_i_avg[c], 0, 0}, \
++  {base + 44, T_I16, F_RO, &po_clamp[c], 0, 0}
++
++static const Field fields[] = {
++  {2,  T_I32, F_RO, &state.batt_v_raw, 0, 0},
++  {3,  T_I32, F_RO, &state.batt_i_raw, 0, 0},
++  {4,  T_I32, F_RO, &state.temp_ambient, 0, 0},
++  {5,  T_I16, F_RO, &state.safety, 0, 0},
++  {6,  T_I16, F_RO, &state.control, 0, 0},
++  {9,  T_I32, F_RO, &state.loops, 0, 0},
++  {17, T_I16, F_RO, &state.alg, 0, 0},
++  {18, T_I32, F_RO, &state.max_dac, 0, 0},
++  {21, T_U8,  F_RO, &state.fpga_fault, 0, 0},
++  CH(0, 100),
++  CH(1, 200),
++  {1000, T_I32, F_RO, &params.device.serial_number, 0, 0},
++  {1001, T_I32, F_RO, &params.device.hw_rev, 0, 0},
++  {1002, T_F32, F_RW, &params.device.v_scale, 0.000001, 1},
++  {1003, T_F32, F_RW, &params.device.i_scale, 0.000001, 1},
++  {1004, T_F32, F_RW, &params.device.v_cv_charge, 1, 150},
++  {1005, T_F32, F_RW, &params.device.v_cv_charge_hyst, 0.01, 20},
++  {1010, T_F32, F_RW, &params.chan[0].v_scale, 0.000001, 1},
++  {1011, T_F32, F_RW, &params.chan[0].i_scale, 0.000001, 1},
++  {1012, T_F32, F_RW, &params.chan[1].v_scale, 0.000001, 1},
++  {1013, T_F32, F_RW, &params.chan[1].i_scale, 0.000001, 1},
++  {1020, T_I32, F_RO, &params.comm.can_bitrate, 0, 0},
++  {1021, T_I32, F_RO, &params.comm.can_base_addr, 0, 0},
++  {1031, T_I32, F_RW, &params.track.min_retrack_time, 1, 90000},
++};
++#define N_FIELDS (sizeof(fields) / sizeof(fields[0]))
++
++typedef union { uint32 u; int32 i; float f; } Value;
+ static volatile bool pending;
+ static uint8 request[8];
+-typedef union { uint32 u; int32 i; float f; } Value;
+ 
+-/* Called in the CAN ISR: expensive work belongs in the main queue. */
++/* Called in the CAN ISR: the real work runs from the main queue. */
+ void PhotonReceive(const canMsg *msg) {
+   if (pending || msg->frame_type != CAN_FRAME_STD ||
+-      msg->message_type != CAN_MSG_DATA || msg->data_length != 8 ||
+-      msg->data[0] > 6) return;
++      msg->message_type != CAN_MSG_DATA || msg->data_length != 8) return;
+   memcpy(request, msg->data, 8);
+   pending = true;
+   if (!QueuePush(PhotonPoll)) pending = false;
+ }
+ 
+-static int ReadField(uint16 field, Value *v) {
+-#define GET_I(value) v->i = (int32)(value)
+-#define GET_F(value) v->f = (float)(value)
+-  switch (field) {
+-#define STATE(id, type, member) case id: GET_##type(snapshot.member); return 1;
+-#define PARAM(id, type, member, lo, hi) case id: GET_##type(params.member); return 1;
+-#define TUNE(id, member, def, lo, hi) case id: GET_I(photon_tuning.member); return 1;
+-#include "photon_fields.inc"
+-#undef STATE
+-#undef PARAM
+-#undef TUNE
+-  }
+-#undef GET_I
+-#undef GET_F
++static const Field *Find(uint16 id) {
++  uint16 k;
++  for (k = 0; k < N_FIELDS; k++) if (fields[k].id == id) return &fields[k];
+   return 0;
+ }
+ 
+-/* Range comparisons reject NaN as well as infinities. */
+-static int WriteField(uint16 field, Value v) {
+-  if (field == 1004 && !(v.f > params.device.v_cv_charge_hyst)) return 0;
+-  if (field == 1005 && !(v.f < params.device.v_cv_charge)) return 0;
+-#define VALUE_I v.i
+-#define VALUE_F v.f
+-  switch (field) {
+-#define STATE(id, type, member)
+-#define PARAM(id, type, member, lo, hi) \
+-    case id: if (lo == hi || !(VALUE_##type >= lo && VALUE_##type <= hi)) return 0; \
+-    params.member = VALUE_##type; break;
+-#define TUNE(id, member, def, lo, hi) \
+-    case id: if (!(v.i >= lo && v.i <= hi)) return 0; \
+-    if (id == 1109 && v.i >= photon_tuning.max_voltage_raw) return 0; \
+-    if (id == 1110 && v.i <= photon_tuning.min_voltage_raw) return 0; \
+-    photon_tuning.member = v.i; break;
+-#include "photon_fields.inc"
+-#undef STATE
+-#undef PARAM
+-#undef TUNE
+-    default: return 0;
++static int ReadField(uint16 id, Value *v) {
++  const Field *f;
++  if (id >= TUNE_FIRST && id < TUNE_FIRST + TUNE_COUNT) {
++    v->i = ((int32 *)&photon_tuning)[id - TUNE_FIRST];
++    return 1;
++  }
++  f = Find(id);
++  if (!f) return 0;
++  disableInterrupts();
++  switch (f->type) {
++    case T_I32: v->i = *(volatile int32 *)f->ptr; break;
++    case T_F32: v->f = *(volatile float *)f->ptr; break;
++    case T_I16: v->i = *(volatile int16 *)f->ptr; break;
++    default:    v->i = *(volatile uint8 *)f->ptr; break;
++  }
++  restoreInterrupts();
++  return 1;
++}
++
++/* Returns 0 on success or an error code. Range checks reject NaN. */
++static uint32 WriteField(uint16 id, Value v) {
++  const Field *f;
++  if (id >= TUNE_FIRST && id < TUNE_FIRST + TUNE_COUNT) {
++    const Range *r = &tune_range[id - TUNE_FIRST];
++    if (v.i < r->lo || v.i > r->hi) return 3;
++    if (id == 1109 && v.i >= photon_tuning.max_voltage_raw) return 3;
++    if (id == 1110 && v.i <= photon_tuning.min_voltage_raw) return 3;
++    ((int32 *)&photon_tuning)[id - TUNE_FIRST] = v.i;
++    return 0;
++  }
++  f = Find(id);
++  if (!f) return 1;
++  if (f->flags != F_RW) return 3;
++  if (!photon_disabled || state.control != ControlEnum_CAN_DISABLE) return 2;
++  if (f->type == T_F32) {
++    if (!(v.f >= f->lo && v.f <= f->hi)) return 3;
++    if (id == 1004 && !(v.f > params.device.v_cv_charge_hyst)) return 3;
++    if (id == 1005 && !(v.f < params.device.v_cv_charge)) return 3;
++    *(volatile float *)f->ptr = v.f;
++  } else {
++    if (!(v.i >= f->lo && v.i <= f->hi)) return 3;
++    *(volatile int32 *)f->ptr = v.i;
+   }
+-#undef VALUE_I
+-#undef VALUE_F
+   /* Recompute calibrated thresholds while outputs are held disabled. */
+   InitTracker();
+   state.control = ControlEnum_CAN_DISABLE;
+-  return 1;
++  return 0;
+ }
+ 
+ void PhotonPoll(void) {
+   uint8 reply[8], op;
+-  uint16 field;
++  uint16 id;
+   uint32 error = 0;
+   Value v;
+   if (!pending) return;
+   memcpy(reply, request, 8);
+   op = reply[0];
+-  field = (uint16)reply[2] | ((uint16)reply[3] << 8);
++  id = (uint16)reply[2] | ((uint16)reply[3] << 8);
+   v.u = (uint32)reply[4] | ((uint32)reply[5] << 8) |
+         ((uint32)reply[6] << 16) | ((uint32)reply[7] << 24);
+   switch (op) {
+     case 0: v.u = PHOTON_PROTOCOL; break;
+-    case 1: if (!ReadField(field, &v)) error = 1; break;
+-    case 2:
+-      if (!photon_disabled || state.control != ControlEnum_CAN_DISABLE) error = 2;
+-      else if (!WriteField(field, v)) error = 3;
+-      break;
++    case 1: if (!ReadField(id, &v)) error = 1; break;
++    case 2: error = WriteField(id, v); break;
+     case 3: /* Explicit stop; safety recovery cannot silently re-enable it. */
+       photon_disabled = true;
+       disablePWM();
+@@ -118,12 +197,6 @@ void PhotonPoll(void) {
+       if (photon_disabled || state.control != ControlEnum_TRACKING) error = 2;
+       else { state.alg = AlgorithmEnum_MEASURE_VOC; state.loops = 0; v.u = 0; }
+       break;
+-    case 6:
+-      disableInterrupts();
+-      snapshot = state;
+-      restoreInterrupts();
+-      v.u = 0;
+-      break;
+     default: error = 1; break;
+   }
+   reply[0] = error ? 0xff : op | 0x80;
+@@ -135,3 +208,22 @@ void PhotonPoll(void) {
+   pending = false;
+   restoreInterrupts();
+ }
++
++/* Tracker debug frame per channel on base+0xE1 / base+0xE2:
++ * [0..1] v_goal_raw  [2..3] dac  [4..5] P&O period mean v_raw
++ * [6] alg | dir << 2 | clamp << 3 | control << 4   [7] step (saturated) */
++void PhotonStream(void) {
++  uint8 d[8], c;
++  int32 s;
++  if (!photon_tuning.stream) return;
++  for (c = 0; c < 2; c++) {
++    d[0] = state.chan[c].v_goal_raw; d[1] = state.chan[c].v_goal_raw >> 8;
++    d[2] = state.chan[c].dac;        d[3] = state.chan[c].dac >> 8;
++    d[4] = po_v_avg[c];              d[5] = po_v_avg[c] >> 8;
++    d[6] = (state.alg & 3) | ((state.chan[c].dir & 1) << 2) |
++           ((po_clamp[c] & 1) << 3) | ((state.control & 0xf) << 4);
++    s = po_step[c];
++    d[7] = s > 255 ? 255 : s;
++    sendCANMsg(params.comm.can_base_addr + 0xe1 + c, d, 8);
++  }
++}
+diff --git a/photon_service.h b/photon_service.h
+index a6008dd..1a98b2e 100644
+--- a/photon_service.h
++++ b/photon_service.h
+@@ -2,18 +2,18 @@
+ #define PHOTON_SERVICE_H
+ #include "can.h"
+ #include <stdbool.h>
+-#define PHOTON_PROTOCOL 0x50330101UL
++#define PHOTON_PROTOCOL 0x50330201UL
+ typedef struct {
+-#define STATE(id, type, member)
+-#define PARAM(id, type, member, lo, hi)
+ #define TUNE(id, member, def, lo, hi) int32 member;
+ #include "photon_fields.inc"
+-#undef STATE
+-#undef PARAM
+ #undef TUNE
+ } PhotonTuning;
+ extern PhotonTuning photon_tuning;
+ extern volatile bool photon_disabled;
++/* Tracker internals exposed for diagnostics (tracker.c). */
++extern int32 po_step[2], po_p_prev[2], po_v_avg[2], po_i_avg[2];
++extern int16 po_clamp[2];
+ void PhotonReceive(const canMsg *msg);
+ void PhotonPoll(void);
++void PhotonStream(void);
+ #endif
+diff --git a/tracker.c b/tracker.c
+index a462d0a..cb2f1aa 100644
+--- a/tracker.c
++++ b/tracker.c
+@@ -1,680 +1,744 @@
+-/*******************************************************************************
+-tracker.c
+-Copyright (c) 2015, Samuel Lenius
+-All rights reserved.
+-
+-Redistribution and use in source and binary forms, with or without
+-modification, are permitted provided that the following conditions are met:
+-    * Redistributions of source code must retain the above copyright
+-      notice, this list of conditions and the following disclaimer.
+-    * Redistributions in binary form must reproduce the above copyright
+-      notice, this list of conditions and the following disclaimer in the
+-      documentation and/or other materials provided with the distribution.
+-    * Neither the name of UMNSVP nor the
+-      names of its contributors may be used to endorse or promote products
+-      derived from this software without specific prior written permission.
+-
+-THIS SOFTWARE IS PROVIDED BY DILITHIUM POWER SYSTEMS LLC ''AS IS'' AND ANY
+-EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-DISCLAIMED. IN NO EVENT SHALL DILITHIUM POWER SYSTEMS LLC BE LIABLE FOR ANY
+-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-*******************************************************************************/
+-
+-#include "tracker.h"
+-
+-#include "adc.h"
+-#include "can.h"
+-#include "float.h"
+-#include "fpga.h"
+-#include "i2c.h"
+-#include "leds.h"
+-#include "main.h"
+-#include <math.h>
+-#include "params.pb.h"
+-#include "pwm.h"
+-#include "safety.h"
+-#include "state.pb.h"
+-#include "photon_service.h"
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-/*Private Macros*/
+-
+-#define MINVOLT photon_tuning.min_voltage_raw
+-#define MAXVOLT photon_tuning.max_voltage_raw
+-#define MINDAC (8 * ADC_FILT_LEN)   // About 0.66A * 2
+-#define STABILITY_MARGIN (4)  // One count is ~20 mV, so this is about 80 mV.
+-
+-#define DAC_SHIFT 1
+-
+-#define SWEEP_STEP_SIZE (8 * ADC_FILT_LEN)
+-#define SWEEP_DAC_STEP_SIZE photon_tuning.sweep_dac_step
+-
+-
+-static uint16 MAXDAC = 0;
+-static int32 voltage_hyst[2];
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-/*Declarations*/
+-
+-
+-extern volatile StateMessage state;
+-extern volatile ParamsMessage params;
+-extern volatile int thermistor_table[1023];
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void InitTracker(void){
+-  uint16 c;
+-  
+-  if(params.device.hw_rev >= PHOTON_3_2){
+-    // Rev 3.2+ has a 12 bit dac
+-    // https://www.wolframalpha.com/input/?i=16amps+*+2milliohms+*+4990%2F100+*+4096%2F2.048volts
+-    MAXDAC = 2023;  // ~7.5 amp limit 
+-  }else{
+-    MAXDAC = (130 * ADC_FILT_LEN) << DAC_SHIFT; //~7.5A limit
+-  }
+-
+-
+-  for(c=0; c<2; c++){
+-    voltage_hyst[c] = params.track.voltage_hyst / params.chan[c].v_scale;
+-  }
+-
+-
+-  state.max_dac = MAXDAC;
+-  state.control = ControlEnum_INIT;
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-int32 SwitchDirection(int32 dir){
+-  if(dir == TrackingDirectionEnum_UP){
+-    return(TrackingDirectionEnum_DOWN);
+-  }else{
+-    return(TrackingDirectionEnum_UP);
+-  }
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-
+-void TrackerStateMachine(void){
+-  uint16 c = 0;
+-  static uint16 run_alg = 0;
+-  static uint16 run_alg_loops = 0;
+-  static int16 test_param = 0;
+-  static int16 test_param_step = 0;
+-
+-  DEBUG_2_TOG();
+-  CheckSafety();
+-  if (photon_disabled) state.control = ControlEnum_CAN_DISABLE;
+-  UpdateFloatParams();
+-  
+-  if(params.device.hw_rev >= PHOTON_3_2){
+-    state.fpga_fault = LATDbits.LATD10;
+-  }
+-
+-  // Calculate the power in on each channel.
+-  state.batt_p_raw = state.batt_v_raw * state.batt_i_raw;
+-  for(c=0; c<2; c++){
+-    state.chan[c].p_raw = state.chan[c].v_raw * state.chan[c].i_raw;
+-  }
+-
+-  // Decide wether or not the algorighm should run this loop
+-  if(++run_alg_loops >= photon_tuning.algorithm_ticks){
+-    run_alg = TRUE;
+-    run_alg_loops = 0;
+-  }else{
+-    run_alg = FALSE;
+-  }
+-    
+-
+-  switch(state.control){
+-
+-    case ControlEnum_INIT:
+-      disablePWM();
+-      SetPrechargeRelayState(OFF);
+-      SetMainRelayState(OFF);
+-      if(state.loops > 1){
+-        state.loops = 0;
+-        state.precharge_loops = 0;
+-        state.precharge_adc = 0;
+-        state.control = ControlEnum_PRECHARGING;
+-      }
+-      break;
+-
+-    case ControlEnum_PRECHARGING:
+-      disablePWM();
+-      SetPrechargeRelayState(ON);
+-      SetMainRelayState(OFF);
+-      LED_R_ON();
+-
+-      // R = 1000 ohms, C = 387 uF; R*C = 387 milliseconds
+-      // Enforce a minimum of ~3 RC time constants in the precharging state.
+-      // This comes out to about 1.2 seconds. Minimum overall precharge time
+-      // is thus approximately 1.7 seconds.
+-      if((state.loops > 60) && (state.batt_v_raw >= MINVOLT)){
+-        // Must spend 25 loops (~0.5 second) with better than STABILITY_MARGIN
+-        // output voltage stability, and above the two input channel voltages,
+-        // in order to exit precharge and close the main contactor.
+-        if(labs(state.precharge_adc - state.batt_v_raw) <= STABILITY_MARGIN){
+-          if((state.chan[0].v_raw <= (state.batt_v_raw + (2*ADC_FILT_LEN))) &&
+-              state.chan[1].v_raw <= (state.batt_v_raw + (2*ADC_FILT_LEN))){
+-            if(state.precharge_loops++ > 25){
+-              state.loops = 0;
+-              state.control = ControlEnum_CLOSING_MAIN;
+-            }
+-          }
+-        } else {
+-          // Reset the counter if we fail the stability test.
+-          state.precharge_loops = 0;
+-        }
+-      }
+-      state.precharge_adc = state.batt_v_raw;
+-      break;
+-    
+-    case ControlEnum_CLOSING_MAIN:
+-      disablePWM();
+-      SetMainRelayState(ON);
+-      if(state.loops > 5){
+-        SetPrechargeRelayState(OFF);
+-        state.loops = 0;
+-        state.control = ControlEnum_STARTING;
+-        LED_R_OFF();
+-      }
+-      break;
+-
+-    case ControlEnum_STARTING:
+-      SetDacValues(MINDAC, MINDAC); 
+-      for(c=0; c<2; c++){
+-        state.chan[c].v_goal_raw = state.chan[c].v_raw;
+-        state.chan[c].dir = TrackingDirectionEnum_DOWN;
+-      }
+-      
+-      state.control = ControlEnum_TRACKING;
+-      //test_param = 200;
+-      //state.control = ControlEnum_TEST_DAC_STEP;
+-      state.alg = AlgorithmEnum_MEASURE_VOC;
+-      state.loops = 0;
+-      break;
+-
+-    case ControlEnum_TRACKING:
+-      // TODO HAX
+-      //if(GetFpgaMpptEnableState0()){
+-      //  ChannelOff(0);
+-      //  nop(); nop(); nop(); nop();
+-      //  ChannelOn(0);
+-      //}
+-      //if(GetFpgaMpptEnableState1()){
+-      //  ChannelOff(1);
+-      //  nop(); nop(); nop(); nop();
+-      //  ChannelOn(1);
+-      //}
+-
+-      // Switch to constant voltage mode if we're above the CV threshold
+-      if(state.batt_v > params.device.v_cv_charge){
+-        state.control = ControlEnum_CONSTANT_VOLTAGE;
+-      }
+-
+-      switch(state.alg){
+-        case AlgorithmEnum_MEASURE_VOC:
+-          LED_G_ON();
+-          for(c=0; c<2; c++){
+-            ChannelOff(c);
+-            state.chan[c].v_goal_raw = MAXVOLT;
+-          }
+-          if(state.loops >= photon_tuning.voc_ticks){
+-            PreloadForSweep(0);
+-            PreloadForSweep(1);
+-            state.alg = AlgorithmEnum_SWEEP;
+-            state.loops = 0;
+-          }
+-          break;
+-
+-        case AlgorithmEnum_SWEEP:
+-          LED_G_ON();
+-          LED_R_ON();
+-          if(run_alg){
+-            SweepArray(0);
+-            SweepArray(1);
+-          }
+-          if((state.chan[0].sweep_done && state.chan[1].sweep_done) ||
+-             (state.loops > photon_tuning.sweep_timeout_ticks)){ // 5 seconds max
+-            state.alg = photon_tuning.algorithm;
+-            state.loops = 0;
+-          }
+-          break;
+-
+-        case AlgorithmEnum_PERTURB_OBSERVE:
+-          LED_R_OFF();
+-          if(run_alg){
+-            PerturbObserve(0);
+-            PerturbObserve(1);
+-          }
+-          if(state.loops > photon_tuning.retrack_ticks){
+-            state.alg = AlgorithmEnum_MEASURE_VOC;
+-            //state.alg = photon_tuning.algorithm;
+-            //state.alg = AlgorithmEnum_INCREMENTAL_CONDUCTANCE;
+-            state.loops = 0;
+-          }
+-          break;
+-
+-        case AlgorithmEnum_INCREMENTAL_CONDUCTANCE:
+-          if(run_alg){
+-            for(c=0; c<2; c++){
+-              state.chan[c].v_delta = state.chan[c].v - state.chan[c].v_last;
+-              state.chan[c].i_delta = state.chan[c].i - state.chan[c].i_last;
+-              state.chan[c].iv = state.chan[c].v != 0 ? state.chan[c].i / state.chan[c].v : 0;
+-              state.chan[c].didv = state.chan[c].v_delta != 0 ?
+-                  state.chan[c].i_delta / state.chan[c].v_delta : 0;
+-              IncrementalConductance(c);
+-              state.chan[c].v_last = state.chan[c].v;
+-              state.chan[c].i_last = state.chan[c].i;
+-            }
+-          }
+-          if(state.loops > photon_tuning.retrack_ticks){
+-            state.alg = AlgorithmEnum_MEASURE_VOC;
+-            state.loops = 0;
+-          }
+-          break;
+-
+-      }break;
+-
+-    case ControlEnum_CONSTANT_VOLTAGE:
+-      if(state.batt_v <
+-          (params.device.v_cv_charge - params.device.v_cv_charge_hyst)){
+-        state.control = ControlEnum_TRACKING;
+-      }
+-         
+-      if(state.batt_v > params.device.v_cv_charge){
+-        for(c=0; c<2; c++){
+-          state.chan[c].dac = LimitDac(state.chan[c].dac - 1);
+-          if(state.chan[c].dac == MINDAC){
+-            ChannelOff(c);
+-          }
+-        }
+-      }
+-      break;
+-
+-    case ControlEnum_ERROR_OPEN_RELAY:
+-      disablePWM();
+-      LED_R_ON();
+-      LED_G_OFF();
+-      SetMainRelayState(OFF);
+-      SetPrechargeRelayState(OFF);
+-      break;
+-  
+-    case ControlEnum_ERROR_CLOSED_RELAY:
+-      disablePWM();
+-      LED_R_ON();
+-      LED_G_OFF();
+-      break;
+-  
+-    case ControlEnum_CAN_DISABLE:
+-      LED_G_OFF();
+-      LED_R_OFF();
+-      disablePWM();
+-      SetPrechargeRelayState(OFF);
+-      SetMainRelayState(OFF);
+-      state.loops = 0;
+-      break;
+-  
+-    case ControlEnum_TEST_DAC_STEP:
+-      LED_G_TOG();
+-      LED_R_TOG();
+-      ChannelOn(0);
+-      ChannelOn(1);
+-      if(state.loops < 2*50){
+-        state.chan[0].dac = 100;
+-        state.chan[1].dac = 100;
+-      }else if(state.loops < 4*50){
+-        state.chan[0].dac = test_param;
+-        state.chan[1].dac = test_param;
+-      }else{
+-        state.loops = 0;
+-        test_param += 100;
+-        if(test_param > MAXDAC){
+-          test_param = MAXVOLT;
+-          test_param_step = -600;
+-          state.control = ControlEnum_TEST_CONTROL_VOLTAGE;
+-        }
+-      }
+-      SetDacValues(state.chan[0].dac, state.chan[1].dac); 
+-      break;
+-  
+-    case ControlEnum_TEST_CONTROL_VOLTAGE:
+-      LED_G_TOG();
+-      LED_R_TOG();
+-      ChannelOn(0);
+-      ChannelOn(1);
+-      if(state.loops < 2*50){
+-        state.chan[0].v_goal_raw = test_param;
+-        state.chan[1].v_goal_raw = test_param;
+-      }else{
+-        state.loops = 0;
+-        test_param += test_param_step;
+-        if(test_param < MINVOLT || test_param > MAXVOLT){
+-          state.control = ControlEnum_TRACKING;
+-        }
+-      }
+-      break;
+-  
+-    case ControlEnum_TEST_MODE:
+-      LED_G_TOG();
+-      LED_R_TOG();
+-      SetPrechargeRelayState(ON);
+-      SetMainRelayState(ON);
+-      ChannelOn(0);
+-      ChannelOn(1);
+-      SetDacValues(state.chan[0].dac, state.chan[1].dac); 
+-      break;
+-  
+-    default:
+-      disablePWM();
+-      state.loops = 0;
+-      state.control = ControlEnum_INIT;
+-      break;
+-  }
+-
+-  // Update state variables
+-  if(run_alg){
+-    state.batt_p_last_raw = state.batt_p_raw;
+-    state.chan[0].p_last_raw = state.chan[0].p_raw;
+-    state.chan[1].p_last_raw = state.chan[1].p_raw;
+-  }
+-  
+-  if(params.device.hw_rev == PHOTON_3_0){
+-      // The remote sensors are garbage on this rev - just use the processor
+-      // temp sensor instead.
+-      state.temp_ambient = GetTemp(TMP422_LOCAL);
+-      state.chan[0].temp = state.temp_ambient;
+-      state.chan[1].temp = state.temp_ambient;
+-  }
+-
+-  state.loops++;
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-void UpdateFloatParams(void){
+-  int c;
+-  state.batt_v = state.batt_v_raw * params.device.v_scale;  
+-  state.batt_i = state.batt_i_raw * params.device.i_scale;  
+-  for(c=0; c<2; c++){
+-    state.chan[c].v = state.chan[c].v_raw * params.chan[c].v_scale;  
+-    state.chan[c].i = state.chan[c].i_raw * params.chan[c].i_scale;
+-  }  
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-void UpdateCvDac(void){
+-  if(state.batt_v < 
+-     (params.device.v_cv_charge - params.device.v_cv_charge_hyst)){
+-    if(state.max_dac < MAXDAC){
+-      state.max_dac++;
+-    }
+-  }
+-  if(state.batt_v > params.device.v_cv_charge){
+-    if(state.max_dac > 0){
+-      state.max_dac--;
+-    }
+-    else{
+-      disablePWM();
+-    }
+-  }
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void UpdateVoc(uint8 c){
+-  if(state.chan[c].v_raw > state.chan[c].voc_raw){
+-    state.chan[c].voc_raw = state.chan[c].v_raw;
+-    state.chan[c].vsc_raw = (state.chan[c].v_raw * photon_tuning.sweep_floor_percent) / 100;
+-  }
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void MaybeInitiateRetrack(){
+-  if(state.loops > params.track.min_retrack_time){
+-    state.alg = AlgorithmEnum_MEASURE_VOC;
+-    state.loops = 0;
+-  }
+-}
+-
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void PreloadForSweep(uint8 c){
+-  int new_voc = (state.chan[c].v_raw*11)/10;
+-
+-  if(new_voc > state.chan[c].voc_raw){
+-    state.chan[c].voc_raw = new_voc;
+-  }
+-  state.chan[c].vsc_raw = (state.chan[c].v_raw * photon_tuning.sweep_floor_percent) / 100;
+-  state.chan[c].v_goal_raw = state.chan[c].v_raw;
+-  state.chan[c].v_raw_sweep_done = (state.chan[c].v_raw * photon_tuning.sweep_floor_percent) / 100;
+-  state.chan[c].p_raw_sweep_mpp = 0;
+-  state.chan[c].v_raw_sweep_mpp = 0;
+-  state.chan[c].dac = MINDAC;
+-  state.chan[c].sweep_done = False;
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void SweepArray(uint8 c){
+-  if(state.chan[c].sweep_done == False){
+-    if(state.chan[c].p_raw > state.chan[c].p_raw_sweep_mpp){
+-      state.chan[c].p_raw_sweep_mpp = state.chan[c].p_raw;
+-      state.chan[c].v_raw_sweep_mpp = state.chan[c].v_raw;
+-      state.chan[c].v_goal_raw = state.chan[c].v_raw;
+-      state.chan[c].i_term = state.chan[c].dac;
+-    }
+-
+-    // Check to make sure voc is sane
+-    UpdateVoc(c);
+-
+-    // Check if we're done sweeping
+-    if(state.chan[c].v_raw <= (state.chan[c].vsc_raw)){
+-      state.chan[c].sweep_done = True;
+-    }else{
+-      state.chan[c].dac = LimitDac(state.chan[c].dac + SWEEP_DAC_STEP_SIZE);
+-      // Preload i term
+-    }
+-    if(state.chan[c].v_raw <= MINVOLT){
+-      state.chan[c].sweep_done = True;
+-    }
+-  }else{
+-    // hold at the MPP
+-    state.chan[c].v_goal_raw = state.chan[c].v_raw_sweep_mpp;
+-    state.chan[c].dac = state.chan[c].i_term;
+-  }
+-  ChannelOn(c);
+-
+-
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-#define INC_STEP_SIZE photon_tuning.inc_step
+-
+-void IncrementalConductance(uint8 c){
+-  if(state.chan[c].v_delta == 0.0){
+-    if(state.chan[c].i_delta > 0.0){
+-      state.chan[c].v_goal_raw += INC_STEP_SIZE;
+-    }else if(state.chan[c].i_delta < 0.0){
+-      state.chan[c].v_goal_raw -= INC_STEP_SIZE;
+-    }
+-  }else if(state.chan[c].didv > -state.chan[c].iv){
+-    state.chan[c].v_goal_raw += INC_STEP_SIZE;
+-  }else if(state.chan[c].didv < -state.chan[c].iv){
+-    state.chan[c].v_goal_raw -= INC_STEP_SIZE;
+-  }
+-  state.chan[c].v_goal_raw = MAX(MINVOLT, MIN(MAXVOLT, state.chan[c].v_goal_raw));
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-#define MIN_PO_CURRENT (62 * ADC_FILT_LEN)
+-#define MIN_PO_VOLTAGE (19 * ADC_FILT_LEN)
+-
+-
+-void PerturbObserve(uint8 c){
+-  /*
+-  if(state.chan[c].p_last_raw > state.chan[c].p_raw){
+-    if(state.chan[c].i_raw > MIN_PO_CURRENT){
+-      state.chan[c].dir = SwitchDirection(state.chan[c].dir);
+-      state.chan[c].v_raw_last_change = state.chan[c].v_goal_raw;
+-    }
+-  }
+-  */
+-  if(abs(state.chan[c].v_raw - state.chan[c].v_raw_last_change) > voltage_hyst[c]){
+-    if(state.chan[c].p_last_change_raw > state.chan[c].p_raw){
+-      state.chan[c].dir = SwitchDirection(state.chan[c].dir);
+-      state.chan[c].v_raw_last_change = state.chan[c].v_raw;
+-    }
+-    state.chan[c].p_last_change_raw = state.chan[c].p_raw;
+-  }
+- 
+-
+-
+-
+-  if(state.chan[c].dir == TrackingDirectionEnum_UP){
+-    state.chan[c].v_goal_raw += params.track.po_step_size;
+-  }else{
+-    state.chan[c].v_goal_raw -= params.track.po_step_size;
+-  }
+-
+-  if(state.chan[c].v_goal_raw <= state.chan[c].vsc_raw){
+-    MaybeInitiateRetrack();
+-        state.chan[c].v_goal_raw = state.chan[c].vsc_raw;
+-    state.chan[c].dir = SwitchDirection(state.chan[c].dir);
+-    state.chan[c].v_raw_last_change = state.chan[c].v_goal_raw;
+-  } 
+-  if(state.chan[c].v_goal_raw >= state.chan[c].voc_raw){
+-    MaybeInitiateRetrack();
+-    state.chan[c].v_goal_raw = state.chan[c].voc_raw;
+-    state.chan[c].dir = SwitchDirection(state.chan[c].dir);
+-    state.chan[c].v_raw_last_change = state.chan[c].v_goal_raw;
+-  }
+-  if(state.chan[c].p_raw <= ((state.chan[c].p_raw_sweep_mpp / 100) * photon_tuning.power_drop_percent)){
+-    MaybeInitiateRetrack();
+-    state.chan[c].v_goal_raw = state.chan[c].v_raw_sweep_mpp;
+-    state.chan[c].v_raw_last_change = state.chan[c].v_goal_raw;
+-  }
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-inline bool CheckIfVoltageInRange(int32 v_in){
+-  if(v_in < MINVOLT) return False;
+-  if(v_in > MAXVOLT) return False;  
+-  return True;
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-inline int32 LimitDac(int32 dac){
+-  if(dac > state.max_dac) return state.max_dac;
+-  if(dac < MINDAC) return MINDAC;
+-  return dac;
+-}
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-#define MAX_PID_ERROR photon_tuning.max_pid_error // ~5V 
+-inline int32 LimitPidError(int32 error){
+-  if(error > MAX_PID_ERROR) return MAX_PID_ERROR;
+-  if(error < -MAX_PID_ERROR) return -MAX_PID_ERROR;
+-  return error;
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-// Run at 200hz
+-void ControlVoltages(void){
+-  int16 c = 0;
+-
+-  if(state.control == ControlEnum_TRACKING || 
+-      state.control == ControlEnum_TEST_CONTROL_VOLTAGE){
+-    DEBUG_3_TOG();
+-    for(c=0; c<2; c++){
+-      if(state.alg != AlgorithmEnum_SWEEP && state.alg != AlgorithmEnum_MEASURE_VOC){
+-        // Limit the error term to prevent integral windup and slew on the
+-        // controller
+-        state.chan[c].v_error_raw = LimitPidError(state.chan[c].v_raw -
+-                                                  state.chan[c].v_goal_raw);
+-      
+-        if(CheckIfVoltageInRange(state.chan[c].v_raw)){
+-          state.chan[c].p_term = state.chan[c].v_error_raw / photon_tuning.p_divisor;
+-          state.chan[c].i_term += state.chan[c].v_error_raw / photon_tuning.i_divisor;
+-          state.chan[c].i_term = LimitDac(state.chan[c].i_term);
+-          state.chan[c].dac = LimitDac(state.chan[c].p_term +
+-                                     state.chan[c].i_term);
+-          ChannelOn(c);
+-        }else{
+-          ChannelOff(c);
+-          if(state.control == ControlEnum_TRACKING){
+-            // Trigger Retrack
+-            MaybeInitiateRetrack();
+-            
+-            // Jump to the measured open circuit voltage
+-            if(state.loops > 50){
+-              state.chan[c].v_goal_raw = state.chan[c].voc_raw;
+-            }
+-          }
+-          //state.chan[c].dac = MINDAC;
+-          //state.chan[c].i_term = 0;
+-        }
+-      }else{
+-        ChannelOn(c);
+-      }
+-    }
+-
+-    SetDacValues(state.chan[0].dac, state.chan[1].dac); 
+-  }else if(state.control == ControlEnum_TEST_DAC_STEP ||
+-           state.control == ControlEnum_TEST_MODE ||
+-           state.control == ControlEnum_CONSTANT_VOLTAGE){
+-    nop();
+-  }else{
+-    for(c=0; c<2; c++){
+-      ChannelOff(c);
+-    }
+-  }
+-}
+-
+-/******************************************************************************/
+-/******************************************************************************/
+-
+-void SetDacValues(uint16 ch0, uint16 ch1){
+-    if(params.device.hw_rev >= PHOTON_3_2){
+-      nop(); 
+-      //SetDacVoltageMcp4728(DAC_I_REF_0, ch0);
+-      //SetDacVoltageMcp4728(DAC_I_REF_1, ch1);
+-    }else{
+-      CMPDAC1 = ch0 >> DAC_SHIFT;
+-      CMPDAC3 = ch1 >> DAC_SHIFT;
+-      PTCONbits.PTEN = 1;
+-    }
+-} 
+-
++/*******************************************************************************
++tracker.c
++Copyright (c) 2015, Samuel Lenius
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are met:
++    * Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++    * Redistributions in binary form must reproduce the above copyright
++      notice, this list of conditions and the following disclaimer in the
++      documentation and/or other materials provided with the distribution.
++    * Neither the name of UMNSVP nor the
++      names of its contributors may be used to endorse or promote products
++      derived from this software without specific prior written permission.
++
++THIS SOFTWARE IS PROVIDED BY DILITHIUM POWER SYSTEMS LLC ''AS IS'' AND ANY
++EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED. IN NO EVENT SHALL DILITHIUM POWER SYSTEMS LLC BE LIABLE FOR ANY
++DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++*******************************************************************************/
++
++#include "tracker.h"
++
++#include "adc.h"
++#include "can.h"
++#include "float.h"
++#include "fpga.h"
++#include "i2c.h"
++#include "leds.h"
++#include "main.h"
++#include <math.h>
++#include "params.pb.h"
++#include "pwm.h"
++#include "safety.h"
++#include "state.pb.h"
++#include "photon_service.h"
++
++/******************************************************************************/
++/******************************************************************************/
++/*Private Macros*/
++
++#define MINVOLT photon_tuning.min_voltage_raw
++#define MAXVOLT photon_tuning.max_voltage_raw
++#define MINDAC (8 * ADC_FILT_LEN)   // About 0.66A * 2
++#define STABILITY_MARGIN (4)  // One count is ~20 mV, so this is about 80 mV.
++
++#define DAC_SHIFT 1
++
++#define SWEEP_STEP_SIZE (8 * ADC_FILT_LEN)
++#define SWEEP_DAC_STEP_SIZE photon_tuning.sweep_dac_step
++
++
++static uint16 MAXDAC = 0;
++static int32 voltage_hyst[2];
++
++// Power P&O state, exposed through photon_service for diagnostics.
++int32 po_step[2], po_p_prev[2], po_v_avg[2], po_i_avg[2];
++int16 po_clamp[2];
++static int16 po_tick[2], po_run[2], po_have_prev[2];
++// Accumulated by ControlVoltages (200 Hz) during the averaging window.
++static int32 po_acc_v[2], po_acc_i[2], po_acc_n[2];
++static bool po_accumulate[2];
++// Fractional part of the PI integrator, 1/256 DAC counts.
++static int16 i_frac[2];
++
++static void PoReset(uint8 c){
++  po_tick[c] = 0;
++  po_run[c] = 0;
++  po_have_prev[c] = 0;
++  po_step[c] = photon_tuning.po_step_min;
++  po_accumulate[c] = false;
++  po_clamp[c] = 0;
++  i_frac[c] = 0;
++}
++
++/******************************************************************************/
++/******************************************************************************/
++/*Declarations*/
++
++
++extern volatile StateMessage state;
++extern volatile ParamsMessage params;
++extern volatile int thermistor_table[1023];
++
++/******************************************************************************/
++/******************************************************************************/
++
++void InitTracker(void){
++  uint16 c;
++  
++  if(params.device.hw_rev >= PHOTON_3_2){
++    // Rev 3.2+ has a 12 bit dac
++    // https://www.wolframalpha.com/input/?i=16amps+*+2milliohms+*+4990%2F100+*+4096%2F2.048volts
++    MAXDAC = 2023;  // ~7.5 amp limit 
++  }else{
++    MAXDAC = (130 * ADC_FILT_LEN) << DAC_SHIFT; //~7.5A limit
++  }
++
++
++  for(c=0; c<2; c++){
++    voltage_hyst[c] = params.track.voltage_hyst / params.chan[c].v_scale;
++  }
++
++
++  state.max_dac = MAXDAC;
++  state.control = ControlEnum_INIT;
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++int32 SwitchDirection(int32 dir){
++  if(dir == TrackingDirectionEnum_UP){
++    return(TrackingDirectionEnum_DOWN);
++  }else{
++    return(TrackingDirectionEnum_UP);
++  }
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++
++void TrackerStateMachine(void){
++  uint16 c = 0;
++  static uint16 run_alg = 0;
++  static uint16 run_alg_loops = 0;
++  static int16 test_param = 0;
++  static int16 test_param_step = 0;
++
++  DEBUG_2_TOG();
++  CheckSafety();
++  if (photon_disabled) state.control = ControlEnum_CAN_DISABLE;
++  UpdateFloatParams();
++  
++  if(params.device.hw_rev >= PHOTON_3_2){
++    state.fpga_fault = LATDbits.LATD10;
++  }
++
++  // Calculate the power in on each channel.
++  state.batt_p_raw = state.batt_v_raw * state.batt_i_raw;
++  for(c=0; c<2; c++){
++    state.chan[c].p_raw = state.chan[c].v_raw * state.chan[c].i_raw;
++  }
++
++  // Decide wether or not the algorighm should run this loop
++  if(++run_alg_loops >= photon_tuning.algorithm_ticks){
++    run_alg = TRUE;
++    run_alg_loops = 0;
++  }else{
++    run_alg = FALSE;
++  }
++    
++
++  switch(state.control){
++
++    case ControlEnum_INIT:
++      disablePWM();
++      SetPrechargeRelayState(OFF);
++      SetMainRelayState(OFF);
++      if(state.loops > 1){
++        state.loops = 0;
++        state.precharge_loops = 0;
++        state.precharge_adc = 0;
++        state.control = ControlEnum_PRECHARGING;
++      }
++      break;
++
++    case ControlEnum_PRECHARGING:
++      disablePWM();
++      SetPrechargeRelayState(ON);
++      SetMainRelayState(OFF);
++      LED_R_ON();
++
++      // R = 1000 ohms, C = 387 uF; R*C = 387 milliseconds
++      // Enforce a minimum of ~3 RC time constants in the precharging state.
++      // This comes out to about 1.2 seconds. Minimum overall precharge time
++      // is thus approximately 1.7 seconds.
++      if((state.loops > 60) && (state.batt_v_raw >= MINVOLT)){
++        // Must spend 25 loops (~0.5 second) with better than STABILITY_MARGIN
++        // output voltage stability, and above the two input channel voltages,
++        // in order to exit precharge and close the main contactor.
++        if(labs(state.precharge_adc - state.batt_v_raw) <= STABILITY_MARGIN){
++          if((state.chan[0].v_raw <= (state.batt_v_raw + (2*ADC_FILT_LEN))) &&
++              state.chan[1].v_raw <= (state.batt_v_raw + (2*ADC_FILT_LEN))){
++            if(state.precharge_loops++ > 25){
++              state.loops = 0;
++              state.control = ControlEnum_CLOSING_MAIN;
++            }
++          }
++        } else {
++          // Reset the counter if we fail the stability test.
++          state.precharge_loops = 0;
++        }
++      }
++      state.precharge_adc = state.batt_v_raw;
++      break;
++    
++    case ControlEnum_CLOSING_MAIN:
++      disablePWM();
++      SetMainRelayState(ON);
++      if(state.loops > 5){
++        SetPrechargeRelayState(OFF);
++        state.loops = 0;
++        state.control = ControlEnum_STARTING;
++        LED_R_OFF();
++      }
++      break;
++
++    case ControlEnum_STARTING:
++      SetDacValues(MINDAC, MINDAC); 
++      for(c=0; c<2; c++){
++        state.chan[c].v_goal_raw = state.chan[c].v_raw;
++        state.chan[c].dir = TrackingDirectionEnum_DOWN;
++      }
++      
++      state.control = ControlEnum_TRACKING;
++      //test_param = 200;
++      //state.control = ControlEnum_TEST_DAC_STEP;
++      state.alg = AlgorithmEnum_MEASURE_VOC;
++      state.loops = 0;
++      break;
++
++    case ControlEnum_TRACKING:
++      // TODO HAX
++      //if(GetFpgaMpptEnableState0()){
++      //  ChannelOff(0);
++      //  nop(); nop(); nop(); nop();
++      //  ChannelOn(0);
++      //}
++      //if(GetFpgaMpptEnableState1()){
++      //  ChannelOff(1);
++      //  nop(); nop(); nop(); nop();
++      //  ChannelOn(1);
++      //}
++
++      // Switch to constant voltage mode if we're above the CV threshold
++      if(state.batt_v > params.device.v_cv_charge){
++        state.control = ControlEnum_CONSTANT_VOLTAGE;
++      }
++
++      switch(state.alg){
++        case AlgorithmEnum_MEASURE_VOC:
++          LED_G_ON();
++          for(c=0; c<2; c++){
++            ChannelOff(c);
++            state.chan[c].v_goal_raw = MAXVOLT;
++          }
++          if(state.loops >= photon_tuning.voc_ticks){
++            PreloadForSweep(0);
++            PreloadForSweep(1);
++            state.alg = AlgorithmEnum_SWEEP;
++            state.loops = 0;
++          }
++          break;
++
++        case AlgorithmEnum_SWEEP:
++          LED_G_ON();
++          LED_R_ON();
++          if(run_alg){
++            SweepArray(0);
++            SweepArray(1);
++          }
++          if((state.chan[0].sweep_done && state.chan[1].sweep_done) ||
++             (state.loops > photon_tuning.sweep_timeout_ticks)){ // 5 seconds max
++            state.alg = photon_tuning.algorithm;
++            state.loops = 0;
++            PoReset(0);
++            PoReset(1);
++          }
++          break;
++
++        case AlgorithmEnum_PERTURB_OBSERVE:
++          LED_R_OFF();
++          if(photon_tuning.hold_v_raw){
++            // Hold a commanded input voltage; no tracking and no retrack.
++            for(c=0; c<2; c++){
++              state.chan[c].v_goal_raw = MAX(MINVOLT, MIN(MAXVOLT, photon_tuning.hold_v_raw));
++              po_have_prev[c] = 0;
++            }
++            state.loops = 0;
++            break;
++          }
++          PerturbObserve(0);
++          PerturbObserve(1);
++          if(state.loops > photon_tuning.retrack_ticks){
++            state.alg = AlgorithmEnum_MEASURE_VOC;
++            //state.alg = photon_tuning.algorithm;
++            //state.alg = AlgorithmEnum_INCREMENTAL_CONDUCTANCE;
++            state.loops = 0;
++          }
++          break;
++
++        case AlgorithmEnum_INCREMENTAL_CONDUCTANCE:
++          if(run_alg){
++            for(c=0; c<2; c++){
++              state.chan[c].v_delta = state.chan[c].v - state.chan[c].v_last;
++              state.chan[c].i_delta = state.chan[c].i - state.chan[c].i_last;
++              state.chan[c].iv = state.chan[c].v != 0 ? state.chan[c].i / state.chan[c].v : 0;
++              state.chan[c].didv = state.chan[c].v_delta != 0 ?
++                  state.chan[c].i_delta / state.chan[c].v_delta : 0;
++              IncrementalConductance(c);
++              state.chan[c].v_last = state.chan[c].v;
++              state.chan[c].i_last = state.chan[c].i;
++            }
++          }
++          if(state.loops > photon_tuning.retrack_ticks){
++            state.alg = AlgorithmEnum_MEASURE_VOC;
++            state.loops = 0;
++          }
++          break;
++
++      }break;
++
++    case ControlEnum_CONSTANT_VOLTAGE:
++      if(state.batt_v <
++          (params.device.v_cv_charge - params.device.v_cv_charge_hyst)){
++        state.control = ControlEnum_TRACKING;
++      }
++         
++      if(state.batt_v > params.device.v_cv_charge){
++        for(c=0; c<2; c++){
++          state.chan[c].dac = LimitDac(state.chan[c].dac - 1);
++          if(state.chan[c].dac == MINDAC){
++            ChannelOff(c);
++          }
++        }
++      }
++      break;
++
++    case ControlEnum_ERROR_OPEN_RELAY:
++      disablePWM();
++      LED_R_ON();
++      LED_G_OFF();
++      SetMainRelayState(OFF);
++      SetPrechargeRelayState(OFF);
++      break;
++  
++    case ControlEnum_ERROR_CLOSED_RELAY:
++      disablePWM();
++      LED_R_ON();
++      LED_G_OFF();
++      break;
++  
++    case ControlEnum_CAN_DISABLE:
++      LED_G_OFF();
++      LED_R_OFF();
++      disablePWM();
++      SetPrechargeRelayState(OFF);
++      SetMainRelayState(OFF);
++      state.loops = 0;
++      break;
++  
++    case ControlEnum_TEST_DAC_STEP:
++      LED_G_TOG();
++      LED_R_TOG();
++      ChannelOn(0);
++      ChannelOn(1);
++      if(state.loops < 2*50){
++        state.chan[0].dac = 100;
++        state.chan[1].dac = 100;
++      }else if(state.loops < 4*50){
++        state.chan[0].dac = test_param;
++        state.chan[1].dac = test_param;
++      }else{
++        state.loops = 0;
++        test_param += 100;
++        if(test_param > MAXDAC){
++          test_param = MAXVOLT;
++          test_param_step = -600;
++          state.control = ControlEnum_TEST_CONTROL_VOLTAGE;
++        }
++      }
++      SetDacValues(state.chan[0].dac, state.chan[1].dac); 
++      break;
++  
++    case ControlEnum_TEST_CONTROL_VOLTAGE:
++      LED_G_TOG();
++      LED_R_TOG();
++      ChannelOn(0);
++      ChannelOn(1);
++      if(state.loops < 2*50){
++        state.chan[0].v_goal_raw = test_param;
++        state.chan[1].v_goal_raw = test_param;
++      }else{
++        state.loops = 0;
++        test_param += test_param_step;
++        if(test_param < MINVOLT || test_param > MAXVOLT){
++          state.control = ControlEnum_TRACKING;
++        }
++      }
++      break;
++  
++    case ControlEnum_TEST_MODE:
++      LED_G_TOG();
++      LED_R_TOG();
++      SetPrechargeRelayState(ON);
++      SetMainRelayState(ON);
++      ChannelOn(0);
++      ChannelOn(1);
++      SetDacValues(state.chan[0].dac, state.chan[1].dac); 
++      break;
++  
++    default:
++      disablePWM();
++      state.loops = 0;
++      state.control = ControlEnum_INIT;
++      break;
++  }
++
++  // Update state variables
++  if(run_alg){
++    state.batt_p_last_raw = state.batt_p_raw;
++    state.chan[0].p_last_raw = state.chan[0].p_raw;
++    state.chan[1].p_last_raw = state.chan[1].p_raw;
++  }
++  
++  if(params.device.hw_rev == PHOTON_3_0){
++      // The remote sensors are garbage on this rev - just use the processor
++      // temp sensor instead.
++      state.temp_ambient = GetTemp(TMP422_LOCAL);
++      state.chan[0].temp = state.temp_ambient;
++      state.chan[1].temp = state.temp_ambient;
++  }
++
++  state.loops++;
++}
++
++/******************************************************************************/
++/******************************************************************************/
++void UpdateFloatParams(void){
++  int c;
++  state.batt_v = state.batt_v_raw * params.device.v_scale;  
++  state.batt_i = state.batt_i_raw * params.device.i_scale;  
++  for(c=0; c<2; c++){
++    state.chan[c].v = state.chan[c].v_raw * params.chan[c].v_scale;  
++    state.chan[c].i = state.chan[c].i_raw * params.chan[c].i_scale;
++  }  
++}
++
++/******************************************************************************/
++/******************************************************************************/
++void UpdateCvDac(void){
++  if(state.batt_v < 
++     (params.device.v_cv_charge - params.device.v_cv_charge_hyst)){
++    if(state.max_dac < MAXDAC){
++      state.max_dac++;
++    }
++  }
++  if(state.batt_v > params.device.v_cv_charge){
++    if(state.max_dac > 0){
++      state.max_dac--;
++    }
++    else{
++      disablePWM();
++    }
++  }
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++void UpdateVoc(uint8 c){
++  if(state.chan[c].v_raw > state.chan[c].voc_raw){
++    state.chan[c].voc_raw = state.chan[c].v_raw;
++    state.chan[c].vsc_raw = (state.chan[c].v_raw * photon_tuning.sweep_floor_percent) / 100;
++  }
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++void MaybeInitiateRetrack(){
++  if(state.loops > params.track.min_retrack_time){
++    state.alg = AlgorithmEnum_MEASURE_VOC;
++    state.loops = 0;
++  }
++}
++
++
++/******************************************************************************/
++/******************************************************************************/
++
++void PreloadForSweep(uint8 c){
++  int new_voc = (state.chan[c].v_raw*11)/10;
++
++  if(new_voc > state.chan[c].voc_raw){
++    state.chan[c].voc_raw = new_voc;
++  }
++  state.chan[c].vsc_raw = (state.chan[c].v_raw * photon_tuning.sweep_floor_percent) / 100;
++  state.chan[c].v_goal_raw = state.chan[c].v_raw;
++  state.chan[c].v_raw_sweep_done = (state.chan[c].v_raw * photon_tuning.sweep_floor_percent) / 100;
++  state.chan[c].p_raw_sweep_mpp = 0;
++  state.chan[c].v_raw_sweep_mpp = 0;
++  state.chan[c].dac = MINDAC;
++  state.chan[c].sweep_done = False;
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++void SweepArray(uint8 c){
++  if(state.chan[c].sweep_done == False){
++    if(state.chan[c].p_raw > state.chan[c].p_raw_sweep_mpp){
++      state.chan[c].p_raw_sweep_mpp = state.chan[c].p_raw;
++      state.chan[c].v_raw_sweep_mpp = state.chan[c].v_raw;
++      state.chan[c].v_goal_raw = state.chan[c].v_raw;
++      state.chan[c].i_term = state.chan[c].dac;
++    }
++
++    // Check to make sure voc is sane
++    UpdateVoc(c);
++
++    // Check if we're done sweeping
++    if(state.chan[c].v_raw <= (state.chan[c].vsc_raw)){
++      state.chan[c].sweep_done = True;
++    }else{
++      state.chan[c].dac = LimitDac(state.chan[c].dac + SWEEP_DAC_STEP_SIZE);
++      // Preload i term
++    }
++    if(state.chan[c].v_raw <= MINVOLT){
++      state.chan[c].sweep_done = True;
++    }
++  }else{
++    // hold at the MPP
++    state.chan[c].v_goal_raw = state.chan[c].v_raw_sweep_mpp;
++    state.chan[c].dac = state.chan[c].i_term;
++  }
++  ChannelOn(c);
++
++
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++#define INC_STEP_SIZE photon_tuning.inc_step
++
++void IncrementalConductance(uint8 c){
++  if(state.chan[c].v_delta == 0.0){
++    if(state.chan[c].i_delta > 0.0){
++      state.chan[c].v_goal_raw += INC_STEP_SIZE;
++    }else if(state.chan[c].i_delta < 0.0){
++      state.chan[c].v_goal_raw -= INC_STEP_SIZE;
++    }
++  }else if(state.chan[c].didv > -state.chan[c].iv){
++    state.chan[c].v_goal_raw += INC_STEP_SIZE;
++  }else if(state.chan[c].didv < -state.chan[c].iv){
++    state.chan[c].v_goal_raw -= INC_STEP_SIZE;
++  }
++  state.chan[c].v_goal_raw = MAX(MINVOLT, MIN(MAXVOLT, state.chan[c].v_goal_raw));
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++// Power-based perturb and observe, called every 20 ms tracker tick.
++// Each period: step the voltage goal, skip po_settle_ticks while the voltage
++// loop settles, then average V and I (200 Hz samples) for the rest of the
++// period. Reverse when the averaged power falls; grow the step while the same
++// direction keeps gaining. The goal is clamped close to the measured voltage
++// so that, against a source whose voltage cannot follow (e.g. a supply in
++// constant voltage), the PI loop cannot wind away from the operating point.
++void PerturbObserve(uint8 c){
++  int32 p, v_avg, i_avg, step, lo, hi;
++  int16 tick = ++po_tick[c];
++
++  if(tick == photon_tuning.po_settle_ticks + 1){
++    po_acc_v[c] = 0;
++    po_acc_i[c] = 0;
++    po_acc_n[c] = 0;
++    po_accumulate[c] = true;
++  }
++  if(tick < photon_tuning.po_period_ticks) return;
++
++  po_accumulate[c] = false;
++  po_tick[c] = 0;
++  if(po_acc_n[c] == 0) return;
++  v_avg = po_acc_v[c] / po_acc_n[c];
++  i_avg = po_acc_i[c] / po_acc_n[c];
++  po_v_avg[c] = v_avg;
++  po_i_avg[c] = i_avg;
++  p = v_avg * i_avg;
++
++  step = po_step[c];
++  if(po_have_prev[c]){
++    if(p < po_p_prev[c]){
++      state.chan[c].dir = SwitchDirection(state.chan[c].dir);
++      step = photon_tuning.po_step_min;
++      po_run[c] = 0;
++    }else if(++po_run[c] >= 2){
++      step = MIN(step * 2, photon_tuning.po_step_max);
++    }
++  }
++  po_step[c] = step;
++  po_p_prev[c] = p;
++  po_have_prev[c] = 1;
++
++  if(state.chan[c].dir == TrackingDirectionEnum_UP){
++    state.chan[c].v_goal_raw += step;
++  }else{
++    state.chan[c].v_goal_raw -= step;
++  }
++
++  // Keep the goal near what the source actually delivers.
++  po_clamp[c] = 0;
++  hi = v_avg + photon_tuning.po_up_clamp;
++  lo = v_avg - photon_tuning.po_down_clamp;
++  if(state.chan[c].v_goal_raw > hi){ state.chan[c].v_goal_raw = hi; po_clamp[c] = 1; }
++  if(state.chan[c].v_goal_raw < lo){ state.chan[c].v_goal_raw = lo; po_clamp[c] = 1; }
++
++  // Array window: retrack if pinned at either end for long enough.
++  if(state.chan[c].v_goal_raw <= state.chan[c].vsc_raw){
++    MaybeInitiateRetrack();
++    state.chan[c].v_goal_raw = state.chan[c].vsc_raw;
++    state.chan[c].dir = TrackingDirectionEnum_UP;
++  }
++  if(state.chan[c].v_goal_raw >= state.chan[c].voc_raw){
++    MaybeInitiateRetrack();
++    state.chan[c].v_goal_raw = state.chan[c].voc_raw;
++    state.chan[c].dir = TrackingDirectionEnum_DOWN;
++  }
++  state.chan[c].v_goal_raw = MAX(MINVOLT, MIN(MAXVOLT, state.chan[c].v_goal_raw));
++  if(p <= ((state.chan[c].p_raw_sweep_mpp / 100) * photon_tuning.power_drop_percent)){
++    MaybeInitiateRetrack();
++  }
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++inline bool CheckIfVoltageInRange(int32 v_in){
++  if(v_in < MINVOLT) return False;
++  if(v_in > MAXVOLT) return False;  
++  return True;
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++inline int32 LimitDac(int32 dac){
++  if(dac > state.max_dac) return state.max_dac;
++  if(dac < MINDAC) return MINDAC;
++  return dac;
++}
++/******************************************************************************/
++/******************************************************************************/
++
++#define MAX_PID_ERROR photon_tuning.max_pid_error // ~5V 
++inline int32 LimitPidError(int32 error){
++  if(error > MAX_PID_ERROR) return MAX_PID_ERROR;
++  if(error < -MAX_PID_ERROR) return -MAX_PID_ERROR;
++  return error;
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++// Run at 200hz
++void ControlVoltages(void){
++  int16 c = 0;
++
++  if(state.control == ControlEnum_TRACKING || 
++      state.control == ControlEnum_TEST_CONTROL_VOLTAGE){
++    DEBUG_3_TOG();
++    for(c=0; c<2; c++){
++      if(po_accumulate[c]){
++        po_acc_v[c] += state.chan[c].v_raw;
++        po_acc_i[c] += state.chan[c].i_raw;
++        po_acc_n[c]++;
++      }
++      if(state.alg != AlgorithmEnum_SWEEP && state.alg != AlgorithmEnum_MEASURE_VOC){
++        // Limit the error term to prevent integral windup and slew on the
++        // controller
++        state.chan[c].v_error_raw = LimitPidError(state.chan[c].v_raw -
++                                                  state.chan[c].v_goal_raw);
++      
++        if(CheckIfVoltageInRange(state.chan[c].v_raw)){
++          int32 acc;
++          state.chan[c].p_term = state.chan[c].v_error_raw / photon_tuning.p_divisor;
++          // Integrate in 1/256 counts so small errors still move the current.
++          acc = (state.chan[c].v_error_raw * 256) / photon_tuning.i_divisor + i_frac[c];
++          state.chan[c].i_term += acc >> 8;
++          i_frac[c] = acc & 0xff;
++          if(state.chan[c].i_term != LimitDac(state.chan[c].i_term)){
++            state.chan[c].i_term = LimitDac(state.chan[c].i_term);
++            i_frac[c] = 0;
++          }
++          state.chan[c].dac = LimitDac(state.chan[c].p_term +
++                                     state.chan[c].i_term);
++          ChannelOn(c);
++        }else{
++          ChannelOff(c);
++          if(state.control == ControlEnum_TRACKING){
++            // Trigger Retrack
++            MaybeInitiateRetrack();
++            
++            // Jump to the measured open circuit voltage
++            if(state.loops > 50){
++              state.chan[c].v_goal_raw = state.chan[c].voc_raw;
++            }
++          }
++          //state.chan[c].dac = MINDAC;
++          //state.chan[c].i_term = 0;
++        }
++      }else{
++        ChannelOn(c);
++      }
++    }
++
++    SetDacValues(state.chan[0].dac, state.chan[1].dac); 
++  }else if(state.control == ControlEnum_TEST_DAC_STEP ||
++           state.control == ControlEnum_TEST_MODE ||
++           state.control == ControlEnum_CONSTANT_VOLTAGE){
++    nop();
++  }else{
++    for(c=0; c<2; c++){
++      ChannelOff(c);
++    }
++  }
++}
++
++/******************************************************************************/
++/******************************************************************************/
++
++void SetDacValues(uint16 ch0, uint16 ch1){
++    if(params.device.hw_rev >= PHOTON_3_2){
++      nop(); 
++      //SetDacVoltageMcp4728(DAC_I_REF_0, ch0);
++      //SetDacVoltageMcp4728(DAC_I_REF_1, ch1);
++    }else{
++      CMPDAC1 = ch0 >> DAC_SHIFT;
++      CMPDAC3 = ch1 >> DAC_SHIFT;
++      PTCONbits.PTEN = 1;
++    }
++} 
++
+-- 
+2.50.1 (Apple Git-155)
+

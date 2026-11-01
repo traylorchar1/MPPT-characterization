@@ -1,0 +1,66 @@
+From 170bba15f53d06f0231b6b2021361331205d26fb Mon Sep 17 00:00:00 2001
+From: Akhil Marri <akhilm28@stanford.edu>
+Date: Mon, 5 Oct 2026 22:32:01 -0700
+Subject: [PATCH 03/12] Reset integrator and P&O on input undervoltage; small
+ steps for 10 periods after finding the source limit
+
+---
+ tracker.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/tracker.c b/tracker.c
+index 35f7621..27cc8a7 100644
+--- a/tracker.c
++++ b/tracker.c
+@@ -63,7 +63,7 @@ static int32 voltage_hyst[2];
+ // Power P&O state, exposed through photon_service for diagnostics.
+ int32 po_step[2], po_p_prev[2], po_v_avg[2], po_i_avg[2];
+ int16 po_clamp[2];
+-static int16 po_tick[2], po_run[2], po_have_prev[2];
++static int16 po_tick[2], po_run[2], po_have_prev[2], po_near[2];
+ // Accumulated by ControlVoltages (200 Hz) during the averaging window.
+ static int32 po_acc_v[2], po_acc_i[2], po_acc_n[2];
+ static bool po_accumulate[2];
+@@ -77,6 +77,7 @@ static void PoReset(uint8 c){
+   po_step[c] = photon_tuning.po_step_min;
+   po_accumulate[c] = false;
+   po_clamp[c] = 0;
++  po_near[c] = 0;
+   i_frac[c] = 0;
+ }
+ 
+@@ -601,6 +602,7 @@ void PerturbObserve(uint8 c){
+     step = photon_tuning.po_step_min;
+     po_run[c] = 0;
+     po_clamp[c] = 1;
++    po_near[c] = 10;
+   }else{
+     po_clamp[c] = 0;
+     if(po_have_prev[c]){
+@@ -617,6 +619,11 @@ void PerturbObserve(uint8 c){
+   // about 3 % of the input voltage.
+   step = MIN(step, photon_tuning.po_step_max);
+   step = MIN(step, MAX(photon_tuning.po_step_min, v_avg >> 5));
++  // Recently found the source's limit: stay in small steps around it.
++  if(po_near[c]){
++    po_near[c]--;
++    step = MIN(step, 2 * photon_tuning.po_step_min);
++  }
+   po_step[c] = step;
+   po_p_prev[c] = p;
+   po_have_prev[c] = 1;
+@@ -702,6 +709,11 @@ void ControlVoltages(void){
+           ChannelOn(c);
+         }else{
+           ChannelOff(c);
++          // Restart from minimum current when the input comes back, rather
++          // than re-applying the current that just collapsed it.
++          state.chan[c].i_term = MINDAC;
++          state.chan[c].dac = MINDAC;
++          PoReset(c);
+           if(state.control == ControlEnum_TRACKING){
+             // Trigger Retrack
+             MaybeInitiateRetrack();
+-- 
+2.50.1 (Apple Git-155)
+

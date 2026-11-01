@@ -1,0 +1,46 @@
+From 001836b85ea39e7e5290d2a5e6663af651c5c895 Mon Sep 17 00:00:00 2001
+From: Akhil Marri <akhilm28@stanford.edu>
+Date: Mon, 5 Oct 2026 22:50:29 -0700
+Subject: [PATCH 05/12] Source-limited rule only with integrator at floor; fast
+ anti-windup when far below goal
+
+---
+ tracker.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/tracker.c b/tracker.c
+index 27cc8a7..fc1ab7b 100644
+--- a/tracker.c
++++ b/tracker.c
+@@ -593,10 +593,11 @@ void PerturbObserve(uint8 c){
+   p = v_avg * i_avg;
+ 
+   step = po_step[c];
+-  if(v_avg < state.chan[c].v_goal_raw - photon_tuning.po_step_min / 2){
+-    // The source is not reaching the goal (e.g. a supply in constant
+-    // voltage): power comparisons carry no information here, so always move
+-    // the goal below what the source actually delivers.
++  if(v_avg < state.chan[c].v_goal_raw - photon_tuning.po_step_min / 2 &&
++     state.chan[c].i_term <= MINDAC + 8){
++    // The source is not reaching the goal even at minimum current (e.g. a
++    // supply in constant voltage): power comparisons carry no information
++    // here, so move the goal below what the source actually delivers.
+     state.chan[c].v_goal_raw = v_avg;
+     state.chan[c].dir = TrackingDirectionEnum_DOWN;
+     step = photon_tuning.po_step_min;
+@@ -700,6 +701,12 @@ void ControlVoltages(void){
+           acc = (state.chan[c].v_error_raw * 256) / photon_tuning.i_divisor + i_frac[c];
+           state.chan[c].i_term += acc >> 8;
+           i_frac[c] = acc & 0xff;
++          // Anti-windup: well below the goal means the current command is
++          // far too high (e.g. the source current limit just dropped), so
++          // bleed the excess off quickly instead of integrating it away.
++          if(state.chan[c].v_error_raw < -2 * photon_tuning.po_up_clamp){
++            state.chan[c].i_term -= (state.chan[c].i_term - MINDAC) >> 4;
++          }
+           if(state.chan[c].i_term != LimitDac(state.chan[c].i_term)){
+             state.chan[c].i_term = LimitDac(state.chan[c].i_term);
+             i_frac[c] = 0;
+-- 
+2.50.1 (Apple Git-155)
+
